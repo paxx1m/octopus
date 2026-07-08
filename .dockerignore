@@ -1,0 +1,15 @@
+.git
+.github
+.reasonix
+build
+web/node_modules
+web/.next
+!web/package.json
+!web/pnpm-lock.yaml
+!pnpm-workspace.yaml
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
+data/*.sqlite
+data/*.sqlite3

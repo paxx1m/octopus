@@ -32,8 +32,27 @@
 Run directly:
 
 ```bash
-docker run -d --name octopus -v /path/to/data:/app/data -p 8080:8080 bestrui/octopus
+docker run -d --name octopus \
+  -e OCTOPUS_SERVER_PORT=8080 \
+  -v /path/to/data:/app/data \
+  -p 8080:8080 \
+  bestrui/octopus
 ```
+
+If you want to build the image from source, the Dockerfile will download the `axonhub` dependency during the build stage and also build the frontend static assets directly:
+
+```bash
+docker build -t octopus .
+docker run -d --name octopus \
+  -e OCTOPUS_SERVER_PORT=8080 \
+  -e OCTOPUS_DATABASE_TYPE=sqlite \
+  -e OCTOPUS_DATABASE_PATH=data/data.db \
+  -v $(pwd)/data:/app/data \
+  -p 8080:8080 \
+  octopus
+```
+
+> 💡 **Tip**: The application reads `/app/data/config.json` by default (that is, `./data/config.json` inside the container), and you can override settings with environment variables such as `OCTOPUS_SERVER_PORT`, `OCTOPUS_DATABASE_TYPE`, `OCTOPUS_DATABASE_PATH`, and `OCTOPUS_LOG_LEVEL`. Mount `/app/data` so your config file, SQLite database, and cache data persist across restarts. The image now builds the frontend by default, so a normal startup should serve the full web panel instead of the `static/out/README.md` placeholder file.
 
 Or use docker compose:
 

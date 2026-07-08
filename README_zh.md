@@ -32,8 +32,27 @@
 直接运行
 
 ```bash
-docker run -d --name octopus -v /path/to/data:/app/data -p 8080:8080 bestrui/octopus
+docker run -d --name octopus \
+  -e OCTOPUS_SERVER_PORT=8080 \
+  -v /path/to/data:/app/data \
+  -p 8080:8080 \
+  bestrui/octopus
 ```
+
+如果需要从源码自行构建镜像（Dockerfile 会在构建阶段自动下载 `axonhub` 依赖，并直接构建前端静态资源）：
+
+```bash
+docker build -t octopus .
+docker run -d --name octopus \
+  -e OCTOPUS_SERVER_PORT=8080 \
+  -e OCTOPUS_DATABASE_TYPE=sqlite \
+  -e OCTOPUS_DATABASE_PATH=data/data.db \
+  -v $(pwd)/data:/app/data \
+  -p 8080:8080 \
+  octopus
+```
+
+> 💡 **提示**：程序默认读取 `/app/data/config.json`（即容器内的 `./data/config.json`），并支持使用 `OCTOPUS_SERVER_PORT`、`OCTOPUS_DATABASE_TYPE`、`OCTOPUS_DATABASE_PATH`、`OCTOPUS_LOG_LEVEL` 等环境变量覆盖配置；建议始终挂载 `/app/data`，以便持久化配置文件、SQLite 数据库和缓存数据。镜像内默认会先构建前端，所以正常启动后访问的应是完整管理面板，而不是 `static/out/README.md` 占位文件。
 
 或者使用 docker compose 运行
 
