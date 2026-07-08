@@ -71,42 +71,51 @@ func RerankHandler() gin.HandlerFunc {
 				continue
 			}
 
-			usedKey := channel.GetChannelKey()
-			if usedKey.ChannelKey == "" {
+			keys := channel.GetChannelKeys()
+			if len(keys) == 0 {
 				iter.Skip(channel.ID, 0, channel.Name, "no available key")
 				continue
 			}
-			if iter.SkipCircuitBreak(channel.ID, usedKey.ID, channel.Name) {
-				continue
-			}
 
-			span := iter.StartAttempt(channel.ID, usedKey.ID, channel.Name)
+			allCircuitBroken := true
+			for _, usedKey := range keys {
+				if iter.SkipCircuitBreak(channel.ID, usedKey.ID, channel.Name) {
+					continue
+				}
+				allCircuitBroken = false
 
-			statusCode, fwdErr := rerankForward(ctx, c, channel, usedKey, item.ModelName, req.Model, body)
-			if fwdErr == nil {
+				span := iter.StartAttempt(channel.ID, usedKey.ID, channel.Name)
+
+				statusCode, fwdErr := rerankForward(ctx, c, channel, usedKey, item.ModelName, req.Model, body)
+				if fwdErr == nil {
+					usedKey.StatusCode = statusCode
+					usedKey.LastUseTimeStamp = time.Now().Unix()
+					op.ChannelKeyUpdate(usedKey)
+					span.End(dbmodel.AttemptSuccess, "")
+					op.StatsChannelUpdate(channel.ID, dbmodel.StatsMetrics{
+						WaitTime:       span.Duration().Milliseconds(),
+						RequestSuccess: 1,
+					})
+					balancer.RecordSuccess(channel.ID, usedKey.ID, req.Model)
+					saveRerankMetrics(ctx, apiKeyID, req.Model, item.ModelName, startTime, true, nil, iter.Attempts(), channel.ID)
+					return
+				}
+
 				usedKey.StatusCode = statusCode
 				usedKey.LastUseTimeStamp = time.Now().Unix()
 				op.ChannelKeyUpdate(usedKey)
-				span.End(dbmodel.AttemptSuccess, "")
+				span.End(dbmodel.AttemptFailed, fwdErr.Error())
 				op.StatsChannelUpdate(channel.ID, dbmodel.StatsMetrics{
-					WaitTime:       span.Duration().Milliseconds(),
-					RequestSuccess: 1,
+					WaitTime:      span.Duration().Milliseconds(),
+					RequestFailed: 1,
 				})
-				balancer.RecordSuccess(channel.ID, usedKey.ID, req.Model)
-				saveRerankMetrics(ctx, apiKeyID, req.Model, item.ModelName, startTime, true, nil, iter.Attempts(), channel.ID)
-				return
+				balancer.RecordFailure(channel.ID, usedKey.ID, req.Model)
+				lastErr = fmt.Errorf("channel %s key %d failed: %v", channel.Name, usedKey.ID, fwdErr)
 			}
-
-			usedKey.StatusCode = statusCode
-			usedKey.LastUseTimeStamp = time.Now().Unix()
-			op.ChannelKeyUpdate(usedKey)
-			span.End(dbmodel.AttemptFailed, fwdErr.Error())
-			op.StatsChannelUpdate(channel.ID, dbmodel.StatsMetrics{
-				WaitTime:      span.Duration().Milliseconds(),
-				RequestFailed: 1,
-			})
-			balancer.RecordFailure(channel.ID, usedKey.ID, req.Model)
-			lastErr = fmt.Errorf("channel %s failed: %v", channel.Name, fwdErr)
+			if allCircuitBroken {
+				iter.Skip(channel.ID, 0, channel.Name, "all keys circuit-brokered")
+				lastErr = fmt.Errorf("channel %s: all keys circuit-brokered", channel.Name)
+			}
 		}
 
 		if lastErr == nil {

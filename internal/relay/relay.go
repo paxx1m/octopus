@@ -152,19 +152,31 @@ func (r *relayRun) prepareAttempt() (*relayAttempt, error) {
 		return nil, nil
 	}
 
-	usedKey := channel.GetChannelKey()
-	if usedKey.ChannelKey == "" {
+	keys := channel.GetChannelKeys()
+	if len(keys) == 0 {
 		r.iter.Skip(channel.ID, 0, channel.Name, "no available key")
 		return nil, nil
 	}
-	if r.iter.SkipCircuitBreak(channel.ID, usedKey.ID, channel.Name) {
-		log.Debugf("circuit breaker open, skipping channel %s key %d model %s", channel.Name, usedKey.ID, r.internalRequest.Model)
-		return nil, nil
-	}
 
-	outAdapter, err := newOutbound(channel.Type, r.internalRequest, channel.GetBaseUrl(), usedKey.ChannelKey)
-	if err != nil {
-		r.iter.Skip(channel.ID, usedKey.ID, channel.Name, err.Error())
+	var (
+		usedKey    dbmodel.ChannelKey
+		outAdapter transformer.Outbound
+	)
+	for _, candidateKey := range keys {
+		if r.iter.SkipCircuitBreak(channel.ID, candidateKey.ID, channel.Name) {
+			log.Debugf("circuit breaker open, skipping channel %s key %d model %s", channel.Name, candidateKey.ID, r.internalRequest.Model)
+			continue
+		}
+		outAdapter, err = newOutbound(channel.Type, r.internalRequest, channel.GetBaseUrl(), candidateKey.ChannelKey)
+		if err != nil {
+			log.Warnf("failed to build outbound for channel %s key %d: %v", channel.Name, candidateKey.ID, err)
+			continue
+		}
+		usedKey = candidateKey
+		break
+	}
+	if usedKey.ChannelKey == "" {
+		r.iter.Skip(channel.ID, 0, channel.Name, "no available key after circuit break / outbound checks")
 		return nil, nil
 	}
 
@@ -245,53 +257,55 @@ func (r *relayRun) runFallback(ctx context.Context) error {
 		if err != nil || !channel.Enabled {
 			continue
 		}
-		usedKey := channel.GetChannelKey()
-		if usedKey.ChannelKey == "" {
+		keys := channel.GetChannelKeys()
+		if len(keys) == 0 {
 			continue
 		}
 
-		fallbackModels := selectFallbackModels(
-			usedModels, channel.ID, usedKey.ID, channelModelList(channel.Model)...,
-		)
-		if len(fallbackModels) == 0 {
-			continue
-		}
-
-		for _, fm := range fallbackModels {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-
-			// 模型级熔断：跳过已熔断的 (channel, model)
-			if tripped, _ := balancer.IsTripped(channel.ID, usedKey.ID, fm); tripped {
+		for _, usedKey := range keys {
+			fallbackModels := selectFallbackModels(
+				usedModels, channel.ID, usedKey.ID, channelModelList(channel.Model)...,
+			)
+			if len(fallbackModels) == 0 {
 				continue
 			}
 
-			attempt, bErr := r.buildFallbackAttempt(channel, usedKey, fm)
-			if bErr != nil || attempt == nil {
-				continue
-			}
-			log.Infof("relay fallback (model=%s, channel=%s, fallback_model=%s): no group candidate succeeded, trying channel's strongest available model",
-				r.metrics.RequestModel, channel.Name, fm)
+			for _, fm := range fallbackModels {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
 
-			written, runErr := attempt.run()
-			if runErr == nil {
-				log.Infof("relay fallback succeeded (model=%s, channel=%s, fallback_model=%s)",
-					r.metrics.RequestModel, channel.Name, fm)
-				return nil
+				// 模型级熔断：跳过已熔断的 (channel, model)
+				if tripped, _ := balancer.IsTripped(channel.ID, usedKey.ID, fm); tripped {
+					continue
+				}
+
+				attempt, bErr := r.buildFallbackAttempt(channel, usedKey, fm)
+				if bErr != nil || attempt == nil {
+					continue
+				}
+				log.Infof("relay fallback (model=%s, channel=%s, key=%d, fallback_model=%s): no group candidate succeeded, trying channel's strongest available model",
+					r.metrics.RequestModel, channel.Name, usedKey.ID, fm)
+
+				written, runErr := attempt.run()
+				if runErr == nil {
+					log.Infof("relay fallback succeeded (model=%s, channel=%s, key=%d, fallback_model=%s)",
+						r.metrics.RequestModel, channel.Name, usedKey.ID, fm)
+					return nil
+				}
+				// 已写入响应（流式已开始）则不能再切换，直接返回
+				if written {
+					log.Warnf("relay fallback failed (already written, model=%s, key=%d, fallback_model=%s): %v",
+						r.metrics.RequestModel, usedKey.ID, fm, runErr)
+					return runErr
+				}
+				log.Warnf("relay fallback failed (model=%s, channel=%s, key=%d, fallback_model=%s): %v",
+					r.metrics.RequestModel, channel.Name, usedKey.ID, fm, runErr)
+				lastErr = runErr
+				usedModels[fm] = true
 			}
-			// 已写入响应（流式已开始）则不能再切换，直接返回
-			if written {
-				log.Warnf("relay fallback failed (already written, model=%s, fallback_model=%s): %v",
-					r.metrics.RequestModel, fm, runErr)
-				return runErr
-			}
-			log.Warnf("relay fallback failed (model=%s, channel=%s, fallback_model=%s): %v",
-				r.metrics.RequestModel, channel.Name, fm, runErr)
-			lastErr = runErr
-			usedModels[fm] = true
 		}
 	}
 
@@ -379,6 +393,7 @@ func (ra *relayAttempt) forward() (int, error) {
 	if ra.internalRequest.RawRequest == nil {
 		return 0, fmt.Errorf("missing raw request")
 	}
+
 
 	httpClient, err := helper.ChannelHttpClient(ra.channel)
 	if err != nil {
