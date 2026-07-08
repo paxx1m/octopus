@@ -1,8 +1,12 @@
 package model
 
 import (
+	"encoding/json"
+	"fmt"
 	"math/rand"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/looplj/axonhub/llm"
@@ -18,6 +22,62 @@ const (
 )
 
 const ChannelTypeDoubao llm.APIFormat = "doubao"
+
+var legacyChannelTypeMap = map[int]llm.APIFormat{
+	0: llm.APIFormatOpenAIChatCompletion,
+	1: llm.APIFormatOpenAIResponse,
+	2: llm.APIFormatAnthropicMessage,
+	3: llm.APIFormatGeminiContents,
+	4: ChannelTypeDoubao,
+	5: llm.APIFormatOpenAIEmbedding,
+}
+
+func normalizeChannelTypeString(raw string) (llm.APIFormat, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if n, err := strconv.Atoi(raw); err == nil {
+		if mapped, ok := legacyChannelTypeMap[n]; ok {
+			return mapped, nil
+		}
+		return "", fmt.Errorf("unknown legacy channel type: %d", n)
+	}
+	return llm.APIFormat(raw), nil
+}
+
+type channelAlias Channel
+
+func (c *Channel) UnmarshalJSON(data []byte) error {
+	type rawChannel struct {
+		channelAlias
+		Type any `json:"type"`
+	}
+	var rc rawChannel
+	if err := json.Unmarshal(data, &rc); err != nil {
+		return err
+	}
+	*c = Channel(rc.channelAlias)
+	switch v := rc.Type.(type) {
+	case nil:
+		c.Type = ""
+	case string:
+		mapped, err := normalizeChannelTypeString(v)
+		if err != nil {
+			return err
+		}
+		c.Type = mapped
+	case float64:
+		mapped, ok := legacyChannelTypeMap[int(v)]
+		if !ok || float64(int(v)) != v {
+			return fmt.Errorf("unknown legacy channel type: %v", v)
+		}
+		c.Type = mapped
+	default:
+		return fmt.Errorf("unsupported channel type value: %T", v)
+	}
+	return nil
+}
 
 type ChannelKeyMode int
 
