@@ -28,8 +28,27 @@ type circuitEntry struct {
 	mu                  sync.Mutex
 }
 
-// 全局熔断器存储
-var globalBreaker sync.Map // key: string -> value: *circuitEntry
+const (
+	defaultCircuitBreakerThreshold   int64 = 5
+	defaultCircuitBreakerCooldown          = 60
+	defaultCircuitBreakerMaxCooldown       = 600
+	circuitSettingsTTL                     = 5 * time.Second
+)
+
+type circuitSettings struct {
+	Threshold   int64
+	Cooldown    int
+	MaxCooldown int
+}
+
+var (
+	// 全局熔断器存储
+	globalBreaker sync.Map // key: string -> value: *circuitEntry
+
+	circuitSettingsMu       sync.Mutex
+	cachedCircuitSettings   circuitSettings
+	cachedCircuitSettingsAt time.Time
+)
 
 // circuitKey 生成熔断器键：channelID:channelKeyID:modelName
 func circuitKey(channelID, keyID int, modelName string) string {
@@ -46,37 +65,55 @@ func getOrCreateEntry(key string) *circuitEntry {
 	return actual.(*circuitEntry)
 }
 
+func getCircuitSettings() circuitSettings {
+	now := time.Now()
+	circuitSettingsMu.Lock()
+	defer circuitSettingsMu.Unlock()
+
+	if !cachedCircuitSettingsAt.IsZero() && now.Sub(cachedCircuitSettingsAt) < circuitSettingsTTL {
+		return cachedCircuitSettings
+	}
+
+	settings := circuitSettings{
+		Threshold:   defaultCircuitBreakerThreshold,
+		Cooldown:    defaultCircuitBreakerCooldown,
+		MaxCooldown: defaultCircuitBreakerMaxCooldown,
+	}
+	if threshold, err := op.SettingGetInt(model.SettingKeyCircuitBreakerThreshold); err == nil && threshold > 0 {
+		settings.Threshold = int64(threshold)
+	}
+	if cooldown, err := op.SettingGetInt(model.SettingKeyCircuitBreakerCooldown); err == nil && cooldown > 0 {
+		settings.Cooldown = cooldown
+	}
+	if maxCooldown, err := op.SettingGetInt(model.SettingKeyCircuitBreakerMaxCooldown); err == nil && maxCooldown > 0 {
+		settings.MaxCooldown = maxCooldown
+	}
+
+	cachedCircuitSettings = settings
+	cachedCircuitSettingsAt = now
+	return settings
+}
+
 // getThreshold 获取熔断阈值配置
 func getThreshold() int64 {
-	v, err := op.SettingGetInt(model.SettingKeyCircuitBreakerThreshold)
-	if err != nil || v <= 0 {
-		return 5
-	}
-	return int64(v)
+	return getCircuitSettings().Threshold
 }
 
 // GetCooldown 获取当前冷却时间（带指数退避）
 func GetCooldown(tripCount int) time.Duration {
-	base, err := op.SettingGetInt(model.SettingKeyCircuitBreakerCooldown)
-	if err != nil || base <= 0 {
-		base = 60
-	}
-	maxCooldown, err := op.SettingGetInt(model.SettingKeyCircuitBreakerMaxCooldown)
-	if err != nil || maxCooldown <= 0 {
-		maxCooldown = 600
-	}
+	settings := getCircuitSettings()
 
 	// 指数退避：baseCooldown * 2^(tripCount-1)
-	cooldown := base
+	cooldown := settings.Cooldown
 	if tripCount > 1 {
 		shift := tripCount - 1
 		if shift > 20 { // 防止溢出
 			shift = 20
 		}
-		cooldown = base << shift
+		cooldown = settings.Cooldown << shift
 	}
-	if cooldown > maxCooldown {
-		cooldown = maxCooldown
+	if cooldown > settings.MaxCooldown {
+		cooldown = settings.MaxCooldown
 	}
 
 	return time.Duration(cooldown) * time.Second
