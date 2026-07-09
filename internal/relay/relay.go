@@ -77,8 +77,9 @@ func newRelayRun(c *gin.Context, inboundType llm.APIFormat, inAdapter transforme
 			StartTime:       time.Now(),
 			InternalRequest: internalRequest,
 		},
-		iter:  iter,
-		group: group,
+		iter:     iter,
+		group:    group,
+		selector: newChannelSelector(c.Request.Context()),
 	}, nil
 }
 
@@ -141,20 +142,34 @@ func (r *relayRun) run() {
 
 func (r *relayRun) prepareAttempt() (*relayAttempt, error) {
 	item := r.iter.Item()
-	channel, err := op.ChannelGet(item.ChannelID, r.c.Request.Context())
+	if r.selector.skipIfUnavailable(r.iter, item) {
+		return nil, nil
+	}
+
+	channel, err := r.selector.channelFor(item.ChannelID)
 	if err != nil {
 		log.Warnf("failed to get channel %d: %v", item.ChannelID, err)
-		r.iter.Skip(item.ChannelID, 0, fmt.Sprintf("channel_%d", item.ChannelID), fmt.Sprintf("channel not found: %v", err))
+		reason := fmt.Sprintf("channel not found: %v", err)
+		r.selector.markChannelUnavailable(item.ChannelID, reason)
+		r.iter.Skip(item.ChannelID, 0, r.selector.channelName(item.ChannelID), reason)
 		return nil, err
 	}
 	if !channel.Enabled {
+		r.selector.markChannelUnavailable(channel.ID, "channel disabled")
 		r.iter.Skip(channel.ID, 0, channel.Name, "channel disabled")
 		return nil, nil
 	}
 
-	keys := channel.GetChannelKeys()
+	keys := r.selector.keysFor(channel)
 	if len(keys) == 0 {
 		r.iter.Skip(channel.ID, 0, channel.Name, "no available key")
+		return nil, nil
+	}
+
+	availableKeys := r.selector.availableKeys(channel, r.iter)
+	if len(availableKeys) == 0 {
+		r.selector.markModelUnavailable(channel.ID, item.ModelName, "all keys circuit-brokered")
+		r.iter.Skip(channel.ID, 0, channel.Name, "all keys circuit-brokered")
 		return nil, nil
 	}
 
@@ -162,11 +177,7 @@ func (r *relayRun) prepareAttempt() (*relayAttempt, error) {
 		usedKey    dbmodel.ChannelKey
 		outAdapter transformer.Outbound
 	)
-	for _, candidateKey := range keys {
-		if r.iter.SkipCircuitBreak(channel.ID, candidateKey.ID, channel.Name) {
-			log.Debugf("circuit breaker open, skipping channel %s key %d model %s", channel.Name, candidateKey.ID, r.internalRequest.Model)
-			continue
-		}
+	for _, candidateKey := range availableKeys {
 		outAdapter, err = newOutbound(channel.Type, r.internalRequest, channel.GetBaseUrl(), candidateKey.ChannelKey)
 		if err != nil {
 			log.Warnf("failed to build outbound for channel %s key %d: %v", channel.Name, candidateKey.ID, err)
@@ -176,7 +187,8 @@ func (r *relayRun) prepareAttempt() (*relayAttempt, error) {
 		break
 	}
 	if usedKey.ChannelKey == "" {
-		r.iter.Skip(channel.ID, 0, channel.Name, "no available key after circuit break / outbound checks")
+		r.selector.markModelUnavailable(channel.ID, item.ModelName, "all outbound build failed")
+		r.iter.Skip(channel.ID, 0, channel.Name, "all outbound build failed")
 		return nil, nil
 	}
 
@@ -253,18 +265,19 @@ func (r *relayRun) runFallback(ctx context.Context) error {
 		default:
 		}
 
-		channel, err := op.ChannelGet(channelID, ctx)
+		channel, err := r.selector.channelFor(channelID)
 		if err != nil || !channel.Enabled {
 			continue
 		}
-		keys := channel.GetChannelKeys()
+		keys := r.selector.keysFor(channel)
 		if len(keys) == 0 {
 			continue
 		}
+		channelModels := r.selector.channelModels(channel)
 
 		for _, usedKey := range keys {
 			fallbackModels := selectFallbackModels(
-				usedModels, channel.ID, usedKey.ID, channelModelList(channel.Model)...,
+				usedModels, channel.ID, usedKey.ID, channelModels...,
 			)
 			if len(fallbackModels) == 0 {
 				continue
@@ -275,11 +288,6 @@ func (r *relayRun) runFallback(ctx context.Context) error {
 				case <-ctx.Done():
 					return ctx.Err()
 				default:
-				}
-
-				// 模型级熔断：跳过已熔断的 (channel, model)
-				if tripped, _ := balancer.IsTripped(channel.ID, usedKey.ID, fm); tripped {
-					continue
 				}
 
 				attempt, bErr := r.buildFallbackAttempt(channel, usedKey, fm)
@@ -317,6 +325,8 @@ func (r *relayRun) runFallback(ctx context.Context) error {
 
 // run 统一管理一次通道尝试的完整生命周期。
 func (ra *relayAttempt) run() (bool, error) {
+	defer ra.selector.invalidateKeys(ra.channel.ID)
+
 	var span *balancer.AttemptSpan
 	if ra.fallbackModel != "" {
 		// 兜底场景：模型名不由 iter 当前位置决定，避免越界且记录正确的模型

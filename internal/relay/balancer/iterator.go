@@ -30,16 +30,18 @@ func NewIterator(group model.Group, apiKeyID int, requestModel string) *Iterator
 	if group.SessionKeepTime > 0 {
 		stickyTTL := time.Duration(group.SessionKeepTime) * time.Second
 		if sticky := GetSticky(apiKeyID, requestModel, stickyTTL); sticky != nil {
-			for i, item := range candidates {
-				if item.ChannelID == sticky.ChannelID {
-					if i > 0 {
-						// 将粘性通道移到最前面
-						stickyItem := candidates[i]
-						copy(candidates[1:i+1], candidates[0:i])
-						candidates[0] = stickyItem
+			if tripped, _ := IsTripped(sticky.ChannelID, sticky.ChannelKeyID, requestModel); !tripped {
+				for i, item := range candidates {
+					if item.ChannelID == sticky.ChannelID {
+						if i > 0 {
+							// 将粘性通道移到最前面
+							stickyItem := candidates[i]
+							copy(candidates[1:i+1], candidates[0:i])
+							candidates[0] = stickyItem
+						}
+						stickyIdx = 0
+						break
 					}
-					stickyIdx = 0
-					break
 				}
 			}
 		}

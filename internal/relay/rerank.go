@@ -50,6 +50,7 @@ func RerankHandler() gin.HandlerFunc {
 		}
 		startTime := time.Now()
 		ctx := c.Request.Context()
+		selector := newChannelSelector(ctx)
 		var lastErr error
 
 		for iter.Next() {
@@ -60,29 +61,39 @@ func RerankHandler() gin.HandlerFunc {
 			}
 
 			item := iter.Item()
-			channel, err := op.ChannelGet(item.ChannelID, ctx)
+			if selector.skipIfUnavailable(iter, item) {
+				continue
+			}
+
+			channel, err := selector.channelFor(item.ChannelID)
 			if err != nil {
-				iter.Skip(item.ChannelID, 0, fmt.Sprintf("channel_%d", item.ChannelID), fmt.Sprintf("channel not found: %v", err))
+				reason := fmt.Sprintf("channel not found: %v", err)
+				selector.markChannelUnavailable(item.ChannelID, reason)
+				iter.Skip(item.ChannelID, 0, selector.channelName(item.ChannelID), reason)
 				lastErr = err
 				continue
 			}
 			if !channel.Enabled {
+				selector.markChannelUnavailable(channel.ID, "channel disabled")
 				iter.Skip(channel.ID, 0, channel.Name, "channel disabled")
 				continue
 			}
 
-			keys := channel.GetChannelKeys()
+			keys := selector.keysFor(channel)
 			if len(keys) == 0 {
 				iter.Skip(channel.ID, 0, channel.Name, "no available key")
 				continue
 			}
 
-			allCircuitBroken := true
-			for _, usedKey := range keys {
-				if iter.SkipCircuitBreak(channel.ID, usedKey.ID, channel.Name) {
-					continue
-				}
-				allCircuitBroken = false
+			availableKeys := selector.availableKeys(channel, iter)
+			if len(availableKeys) == 0 {
+				selector.markModelUnavailable(channel.ID, item.ModelName, "all keys circuit-brokered")
+				iter.Skip(channel.ID, 0, channel.Name, "all keys circuit-brokered")
+				lastErr = fmt.Errorf("channel %s: all keys circuit-brokered", channel.Name)
+				continue
+			}
+
+			for _, usedKey := range availableKeys {
 
 				span := iter.StartAttempt(channel.ID, usedKey.ID, channel.Name)
 
@@ -91,6 +102,7 @@ func RerankHandler() gin.HandlerFunc {
 					usedKey.StatusCode = statusCode
 					usedKey.LastUseTimeStamp = time.Now().Unix()
 					op.ChannelKeyUpdate(usedKey)
+					selector.invalidateKeys(channel.ID)
 					span.End(dbmodel.AttemptSuccess, "")
 					op.StatsChannelUpdate(channel.ID, dbmodel.StatsMetrics{
 						WaitTime:       span.Duration().Milliseconds(),
@@ -104,6 +116,7 @@ func RerankHandler() gin.HandlerFunc {
 				usedKey.StatusCode = statusCode
 				usedKey.LastUseTimeStamp = time.Now().Unix()
 				op.ChannelKeyUpdate(usedKey)
+				selector.invalidateKeys(channel.ID)
 				span.End(dbmodel.AttemptFailed, fwdErr.Error())
 				op.StatsChannelUpdate(channel.ID, dbmodel.StatsMetrics{
 					WaitTime:      span.Duration().Milliseconds(),
@@ -111,10 +124,6 @@ func RerankHandler() gin.HandlerFunc {
 				})
 				balancer.RecordFailure(channel.ID, usedKey.ID, req.Model)
 				lastErr = fmt.Errorf("channel %s key %d failed: %v", channel.Name, usedKey.ID, fwdErr)
-			}
-			if allCircuitBroken {
-				iter.Skip(channel.ID, 0, channel.Name, "all keys circuit-brokered")
-				lastErr = fmt.Errorf("channel %s: all keys circuit-brokered", channel.Name)
 			}
 		}
 
