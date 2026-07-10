@@ -79,10 +79,15 @@ func (s *channelSelector) keysFor(channel *dbmodel.Channel) []dbmodel.ChannelKey
 	if keys, ok := s.keys[channel.ID]; ok {
 		return keys
 	}
-	keys := channel.GetChannelKeys()
-	if len(keys) > 0 {
-		s.keys[channel.ID] = keys
+	var keys []dbmodel.ChannelKey
+	if channel.NoKey {
+		// ID 0 represents this channel's unauthenticated path. It participates in
+		// circuit breaking but is never persisted as a ChannelKey.
+		keys = []dbmodel.ChannelKey{{ChannelID: channel.ID}}
+	} else {
+		keys = channel.GetChannelKeys()
 	}
+	s.keys[channel.ID] = keys
 	return keys
 }
 

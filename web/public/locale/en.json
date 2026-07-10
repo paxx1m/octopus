@@ -522,6 +522,7 @@
             "modelCustomPlaceholder": "Custom model name",
             "modelAdd": "Add",
             "modelRefresh": "Refresh",
+            "noKey": "No API Key",
             "modelRefreshSuccess": "Models fetched successfully",
             "modelRefreshFailed": "Failed to fetch models",
             "modelRefreshEmpty": "No models found",

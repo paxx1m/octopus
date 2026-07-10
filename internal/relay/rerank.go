@@ -99,9 +99,11 @@ func RerankHandler() gin.HandlerFunc {
 
 				statusCode, fwdErr := rerankForward(ctx, c, channel, usedKey, item.ModelName, req.Model, body)
 				if fwdErr == nil {
-					usedKey.StatusCode = statusCode
-					usedKey.LastUseTimeStamp = time.Now().Unix()
-					op.ChannelKeyUpdate(usedKey)
+					if usedKey.ID != 0 {
+						usedKey.StatusCode = statusCode
+						usedKey.LastUseTimeStamp = time.Now().Unix()
+						op.ChannelKeyUpdate(usedKey)
+					}
 					selector.invalidateKeys(channel.ID)
 					span.End(dbmodel.AttemptSuccess, "")
 					op.StatsChannelUpdate(channel.ID, dbmodel.StatsMetrics{
@@ -113,9 +115,11 @@ func RerankHandler() gin.HandlerFunc {
 					return
 				}
 
-				usedKey.StatusCode = statusCode
-				usedKey.LastUseTimeStamp = time.Now().Unix()
-				op.ChannelKeyUpdate(usedKey)
+				if usedKey.ID != 0 {
+					usedKey.StatusCode = statusCode
+					usedKey.LastUseTimeStamp = time.Now().Unix()
+					op.ChannelKeyUpdate(usedKey)
+				}
 				selector.invalidateKeys(channel.ID)
 				span.End(dbmodel.AttemptFailed, fwdErr.Error())
 				op.StatsChannelUpdate(channel.ID, dbmodel.StatsMetrics{
@@ -160,7 +164,9 @@ func rerankForward(ctx context.Context, c *gin.Context, channel *dbmodel.Channel
 		return 0, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+usedKey.ChannelKey)
+	if !channel.NoKey {
+		httpReq.Header.Set("Authorization", "Bearer "+usedKey.ChannelKey)
+	}
 	for _, h := range channel.CustomHeader {
 		if h.HeaderKey != "" {
 			httpReq.Header.Set(h.HeaderKey, h.HeaderValue)

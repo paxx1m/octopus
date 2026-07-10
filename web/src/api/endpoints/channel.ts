@@ -67,6 +67,7 @@ export type Channel = {
     base_urls: BaseUrl[];
     keys: ChannelKey[];
     key_mode: ChannelKeyMode;
+    no_key: boolean;
     model: string;
     custom_model: string;
     proxy: boolean;
@@ -96,6 +97,7 @@ export type CreateChannelRequest = {
     base_urls: BaseUrl[];
     keys: Array<Pick<ChannelKey, 'enabled' | 'channel_key' | 'weight' | 'remark'>>;
     key_mode?: ChannelKeyMode;
+    no_key?: boolean;
     model: string;
     custom_model?: string;
     proxy?: boolean;
@@ -117,6 +119,7 @@ export type UpdateChannelRequest = {
     enabled?: boolean;
     base_urls?: BaseUrl[];
     key_mode?: ChannelKeyMode;
+    no_key?: boolean;
     model?: string;
     custom_model?: string;
     proxy?: boolean;
@@ -136,6 +139,7 @@ export type FetchModelRequest = {
     type: ChannelType;
     base_urls: BaseUrl[];
     keys: Array<Pick<ChannelKey, 'enabled' | 'channel_key'>>;
+    no_key?: boolean;
     proxy?: boolean;
     channel_proxy?: string | null;
     match_regex?: string | null;

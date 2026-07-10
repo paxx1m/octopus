@@ -522,6 +522,7 @@
             "modelCustomPlaceholder": "自定義模型名稱",
             "modelAdd": "新增",
             "modelRefresh": "重新整理",
+            "noKey": "不使用 Key",
             "modelRefreshSuccess": "模型列表獲取成功",
             "modelRefreshFailed": "模型列表獲取失敗",
             "modelRefreshEmpty": "未獲取到模型列表",

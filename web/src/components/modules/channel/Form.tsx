@@ -35,6 +35,7 @@ export interface ChannelFormData {
     param_override: string;
     keys: ChannelKeyFormItem[];
     key_mode: ChannelKeyMode;
+    no_key: boolean;
     model: string;
     custom_model: string;
     enabled: boolean;
@@ -114,7 +115,7 @@ export function ChannelForm({
     };
 
     const handleRefreshModels = async () => {
-        if (!formData.base_urls?.[0]?.url || !effectiveKey) return;
+        if (!formData.base_urls?.[0]?.url || (!formData.no_key && !effectiveKey)) return;
         fetchModel.mutate(
             {
                 type: formData.type,
@@ -122,6 +123,7 @@ export function ChannelForm({
                 keys: formData.keys
                     .filter((k) => k.channel_key.trim())
                     .map((k) => ({ enabled: k.enabled, channel_key: k.channel_key.trim() })),
+                no_key: formData.no_key,
                 proxy: formData.proxy,
                 channel_proxy: formData.channel_proxy?.trim() || null,
                 match_regex: formData.match_regex.trim() || null,
@@ -346,7 +348,7 @@ export function ChannelForm({
                                 value={k.channel_key}
                                 onChange={(e) => handleUpdateKey(idx, { channel_key: e.target.value })}
                                 placeholder={t('apiKey')}
-                                required={idx === 0}
+                                required={idx === 0 && !formData.no_key}
                                 className="rounded-xl flex-1"
                             />
                             {formData.key_mode === ChannelKeyMode.WeightedRandom && (
@@ -389,17 +391,26 @@ export function ChannelForm({
             <div className="space-y-2">
                 <div className="flex items-center justify-between">
                     <label className="text-sm font-medium text-card-foreground">{t('model')}</label>
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleRefreshModels}
-                        disabled={!formData.base_urls?.[0]?.url || !effectiveKey || fetchModel.isPending}
-                        className="h-6 px-2 text-xs text-muted-foreground/50 hover:text-muted-foreground hover:bg-transparent"
-                    >
-                        <RefreshCw className={`h-3 w-3 mr-1 ${fetchModel.isPending ? 'animate-spin' : ''}`} />
-                        {t('modelRefresh')}
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>{t('noKey')}</span>
+                            <Switch
+                                checked={formData.no_key}
+                                onCheckedChange={(checked) => onFormDataChange({ ...formData, no_key: checked })}
+                            />
+                        </label>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleRefreshModels}
+                            disabled={!formData.base_urls?.[0]?.url || (!formData.no_key && !effectiveKey) || fetchModel.isPending}
+                            className="h-6 px-2 text-xs text-muted-foreground/50 hover:text-muted-foreground hover:bg-transparent"
+                        >
+                            <RefreshCw className={`h-3 w-3 mr-1 ${fetchModel.isPending ? 'animate-spin' : ''}`} />
+                            {t('modelRefresh')}
+                        </Button>
+                    </div>
                 </div>
                 <input type="hidden" value={formData.model} required />
 

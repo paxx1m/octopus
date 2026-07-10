@@ -186,7 +186,7 @@ func (r *relayRun) prepareAttempt() (*relayAttempt, error) {
 		usedKey = candidateKey
 		break
 	}
-	if usedKey.ChannelKey == "" {
+	if usedKey.ChannelKey == "" && !channel.NoKey {
 		r.selector.markModelUnavailable(channel.ID, item.ModelName, "all outbound build failed")
 		r.iter.Skip(channel.ID, 0, channel.Name, "all outbound build failed")
 		return nil, nil
@@ -339,12 +339,16 @@ func (ra *relayAttempt) run() (bool, error) {
 	if fwdErr == nil && upstreamStatusCode == 0 {
 		upstreamStatusCode = http.StatusOK
 	}
-	ra.usedKey.StatusCode = upstreamStatusCode
-	ra.usedKey.LastUseTimeStamp = time.Now().Unix()
+	if ra.usedKey.ID != 0 {
+		ra.usedKey.StatusCode = upstreamStatusCode
+		ra.usedKey.LastUseTimeStamp = time.Now().Unix()
+	}
 
 	if fwdErr == nil {
-		ra.usedKey.TotalCost += ra.metrics.Stats.InputCost + ra.metrics.Stats.OutputCost
-		op.ChannelKeyUpdate(ra.usedKey)
+		if ra.usedKey.ID != 0 {
+			ra.usedKey.TotalCost += ra.metrics.Stats.InputCost + ra.metrics.Stats.OutputCost
+			op.ChannelKeyUpdate(ra.usedKey)
+		}
 
 		span.End(dbmodel.AttemptSuccess, "")
 		op.StatsChannelUpdate(ra.channel.ID, dbmodel.StatsMetrics{
@@ -356,7 +360,9 @@ func (ra *relayAttempt) run() (bool, error) {
 		return false, nil
 	}
 
-	op.ChannelKeyUpdate(ra.usedKey)
+	if ra.usedKey.ID != 0 {
+		op.ChannelKeyUpdate(ra.usedKey)
+	}
 	span.End(dbmodel.AttemptFailed, fwdErr.Error())
 	op.StatsChannelUpdate(ra.channel.ID, dbmodel.StatsMetrics{
 		WaitTime:      span.Duration().Milliseconds(),
@@ -456,6 +462,12 @@ func (ra *relayAttempt) forward() (int, error) {
 }
 
 func (ra *relayAttempt) applyChannelRequestOptions(outboundRequest *httpclient.Request) {
+	if ra.channel.NoKey {
+		outboundRequest.Headers.Del("Authorization")
+		outboundRequest.Headers.Del("X-Api-Key")
+		outboundRequest.Headers.Del("X-Goog-Api-Key")
+	}
+
 	// ParamOverride 只覆盖 JSON 请求体；multipart 图片编辑等请求不能按 map 合并。
 	if ra.channel.ParamOverride != nil && *ra.channel.ParamOverride != "" && strings.Contains(strings.ToLower(outboundRequest.Headers.Get("Content-Type")+" "+outboundRequest.ContentType), "application/json") {
 		var bodyMap map[string]any

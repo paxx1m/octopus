@@ -181,6 +181,10 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 		selectFields = append(selectFields, "key_mode")
 		updates.KeyMode = *req.KeyMode
 	}
+	if req.NoKey != nil {
+		selectFields = append(selectFields, "no_key")
+		updates.NoKey = *req.NoKey
+	}
 
 	// 只有当有字段需要更新时才执行 UPDATE
 	if len(selectFields) > 0 {

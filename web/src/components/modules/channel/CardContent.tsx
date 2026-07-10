@@ -54,6 +54,7 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
             }))
             : [{ enabled: true, channel_key: '', remark: '' }],
         key_mode: channel.key_mode,
+        no_key: channel.no_key,
         model: channel.model,
         custom_model: channel.custom_model,
         proxy: channel.proxy,
@@ -90,6 +91,7 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
         if (formData.auto_sync !== channel.auto_sync) req.auto_sync = formData.auto_sync;
         if (formData.auto_group !== channel.auto_group) req.auto_group = formData.auto_group;
         if (formData.key_mode !== channel.key_mode) req.key_mode = formData.key_mode;
+        if (formData.no_key !== channel.no_key) req.no_key = formData.no_key;
 
         if (!headersEqual(formData.custom_header, channel.custom_header)) {
             req.custom_header = (formData.custom_header ?? [])
