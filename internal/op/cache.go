@@ -4,11 +4,28 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/bestruirui/octopus/internal/utils/log"
 )
 
 func InitCache() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	return loadCache(ctx)
+}
+
+// ReloadCache flushes in-memory runtime state then reloads from DB.
+// Use after import so unsaved channel key costs and stats are not discarded.
+func ReloadCache() error {
+	if err := SaveCache(); err != nil {
+		log.Warnf("save cache before reload failed (continuing reload): %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return loadCache(ctx)
+}
+
+func loadCache(ctx context.Context) error {
 	if err := settingRefreshCache(ctx); err != nil {
 		return fmt.Errorf("setting refresh cache error: %v", err)
 	}

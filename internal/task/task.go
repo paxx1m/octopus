@@ -44,7 +44,7 @@ func Register(name string, interval time.Duration, runOnStart bool, fn func()) {
 		fn:         fn,
 		runOnStart: runOnStart,
 		stopCh:     make(chan struct{}),
-		updateCh:   make(chan time.Duration),
+		updateCh:   make(chan time.Duration, 1),
 	}
 	log.Debugf("task %s registered with interval %v, runOnStart: %v", name, interval, runOnStart)
 }

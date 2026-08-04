@@ -22,11 +22,13 @@ type Iterator struct {
 
 // NewIterator 创建负载均衡迭代器
 // 自动处理：策略排序 + 粘性通道提前
-func NewIterator(group model.Group, apiKeyID int, requestModel string) *Iterator {
+// 返回 stickyKeyID：粘性会话绑定的 channel key（0 表示无）
+func NewIterator(group model.Group, apiKeyID int, requestModel string) (*Iterator, int) {
 	b := GetBalancer(group.Mode)
 	candidates := b.Candidates(group.Items)
 
 	stickyIdx := -1
+	stickyKeyID := 0
 	if group.SessionKeepTime > 0 {
 		stickyTTL := time.Duration(group.SessionKeepTime) * time.Second
 		if sticky := GetSticky(apiKeyID, requestModel, stickyTTL); sticky != nil {
@@ -39,8 +41,13 @@ func NewIterator(group model.Group, apiKeyID int, requestModel string) *Iterator
 						candidates[0] = stickyItem
 					}
 					stickyIdx = 0
+					stickyKeyID = sticky.ChannelKeyID
 					break
 				}
+			}
+			if stickyIdx < 0 {
+				// Sticky channel no longer in candidates; drop stale session
+				ClearSticky(apiKeyID, requestModel)
 			}
 		}
 	}
@@ -50,7 +57,7 @@ func NewIterator(group model.Group, apiKeyID int, requestModel string) *Iterator
 		index:      -1,
 		stickyIdx:  stickyIdx,
 		modelName:  requestModel,
-	}
+	}, stickyKeyID
 }
 
 // Next 移动到下一个候选，返回 false 表示遍历完成
@@ -94,12 +101,13 @@ func (it *Iterator) Skip(channelID, channelKeyID int, channelName, msg string) {
 	})
 }
 
-// SkipCircuitBreak 检查熔断状态，若已熔断自动记录（含剩余冷却时间）并返回 true
-func (it *Iterator) SkipCircuitBreak(channelID, channelKeyID int, channelName string) bool {
+// SkipCircuitBreak 检查熔断状态，若已熔断自动记录（含剩余冷却时间）并返回 true。
+// 若本次请求成为 HalfOpen 探测，返回 isProbe=true，调用方在未完成转发前必须 RecordProbeAborted。
+func (it *Iterator) SkipCircuitBreak(channelID, channelKeyID int, channelName string) (skipped bool, isProbe bool) {
 	modelName := it.candidates[it.index].ModelName
-	tripped, remaining := IsTripped(channelID, channelKeyID, modelName)
+	tripped, remaining, probe := IsTripped(channelID, channelKeyID, modelName)
 	if !tripped {
-		return false
+		return false, probe
 	}
 	msg := "circuit breaker tripped"
 	if remaining > 0 {
@@ -116,7 +124,7 @@ func (it *Iterator) SkipCircuitBreak(channelID, channelKeyID int, channelName st
 		Sticky:       it.IsSticky(),
 		Msg:          msg,
 	})
-	return true
+	return true, false
 }
 
 // StartAttempt 开始一次真实转发尝试，返回 Span 用于记录结果

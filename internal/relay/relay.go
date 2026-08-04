@@ -59,7 +59,7 @@ func newRelayRun(c *gin.Context, inboundType llm.APIFormat, inAdapter transforme
 	}
 
 	apiKeyID := c.GetInt("api_key_id")
-	iter := balancer.NewIterator(group, apiKeyID, internalRequest.Model)
+	iter, stickyKeyID := balancer.NewIterator(group, apiKeyID, internalRequest.Model)
 	if iter.Len() == 0 {
 		err := errors.New("no available channel")
 		resp.Error(c, http.StatusServiceUnavailable, err.Error())
@@ -77,8 +77,9 @@ func newRelayRun(c *gin.Context, inboundType llm.APIFormat, inAdapter transforme
 			StartTime:       time.Now(),
 			InternalRequest: internalRequest,
 		},
-		iter:  iter,
-		group: group,
+		iter:        iter,
+		group:       group,
+		stickyKeyID: stickyKeyID,
 	}, nil
 }
 
@@ -137,16 +138,36 @@ func (r *relayRun) prepareAttempt() (*relayAttempt, error) {
 	}
 
 	usedKey := channel.GetChannelKey()
+	// Prefer sticky key when session affinity selected this channel
+	if sticky := r.stickyKeyID; sticky > 0 {
+		found := false
+		for _, k := range channel.Keys {
+			if k.ID == sticky && k.Enabled && k.ChannelKey != "" {
+				usedKey = k
+				found = true
+				break
+			}
+		}
+		if !found {
+			// Sticky key gone or disabled; clear and fall back to cheapest key
+			balancer.ClearSticky(r.metrics.APIKeyID, r.metrics.RequestModel)
+			r.stickyKeyID = 0
+		}
+	}
 	if usedKey.ChannelKey == "" {
 		r.iter.Skip(channel.ID, 0, channel.Name, "no available key")
 		return nil, nil
 	}
-	if r.iter.SkipCircuitBreak(channel.ID, usedKey.ID, channel.Name) {
+	skipped, isProbe := r.iter.SkipCircuitBreak(channel.ID, usedKey.ID, channel.Name)
+	if skipped {
 		return nil, nil
 	}
 
 	outAdapter, err := newOutbound(channel.Type, r.internalRequest, channel.GetBaseUrl(), usedKey.ChannelKey)
 	if err != nil {
+		if isProbe {
+			balancer.RecordProbeAborted(channel.ID, usedKey.ID, r.iter.Item().ModelName)
+		}
 		r.iter.Skip(channel.ID, usedKey.ID, channel.Name, err.Error())
 		return nil, nil
 	}
@@ -175,12 +196,14 @@ func (ra *relayAttempt) run() (bool, error) {
 	if fwdErr == nil && upstreamStatusCode == 0 {
 		upstreamStatusCode = http.StatusOK
 	}
+	now := time.Now().Unix()
 	ra.usedKey.StatusCode = upstreamStatusCode
-	ra.usedKey.LastUseTimeStamp = time.Now().Unix()
+	ra.usedKey.LastUseTimeStamp = now
 
 	if fwdErr == nil {
-		ra.usedKey.TotalCost += ra.metrics.Stats.InputCost + ra.metrics.Stats.OutputCost
-		op.ChannelKeyUpdate(ra.usedKey)
+		costDelta := ra.metrics.Stats.InputCost + ra.metrics.Stats.OutputCost
+		ra.usedKey.TotalCost += costDelta
+		_ = op.ChannelKeyApplyUpdate(ra.usedKey.ID, ra.channel.ID, upstreamStatusCode, now, costDelta)
 
 		span.End(dbmodel.AttemptSuccess, "")
 		op.StatsChannelUpdate(ra.channel.ID, dbmodel.StatsMetrics{
@@ -192,7 +215,7 @@ func (ra *relayAttempt) run() (bool, error) {
 		return false, nil
 	}
 
-	op.ChannelKeyUpdate(ra.usedKey)
+	_ = op.ChannelKeyApplyUpdate(ra.usedKey.ID, ra.channel.ID, upstreamStatusCode, now, 0)
 	span.End(dbmodel.AttemptFailed, fwdErr.Error())
 	op.StatsChannelUpdate(ra.channel.ID, dbmodel.StatsMetrics{
 		WaitTime:      span.Duration().Milliseconds(),

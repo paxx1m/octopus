@@ -78,8 +78,12 @@ func InitDB(dbType, dsn string, debug bool) error {
 	// Postgres: schema changes during migrations can invalidate cached prepared plans
 	// (e.g. "cached plan must not change result type"). Clear them.
 	if db.Dialector != nil && db.Dialector.Name() == "postgres" {
-		db.Exec("DEALLOCATE ALL")
-		db.Exec("DISCARD ALL")
+		if err := db.Exec("DEALLOCATE ALL").Error; err != nil {
+			return fmt.Errorf("postgres DEALLOCATE ALL: %w", err)
+		}
+		if err := db.Exec("DISCARD ALL").Error; err != nil {
+			return fmt.Errorf("postgres DISCARD ALL: %w", err)
+		}
 	}
 	return nil
 }

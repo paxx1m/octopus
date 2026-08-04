@@ -52,10 +52,10 @@ func Load(path string) error {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
 			log.Infof("Config file not found, creating default config")
 			if err := os.MkdirAll("data", 0755); err != nil {
-				log.Errorf("Failed to create data directory: %v", err)
+				return fmt.Errorf("failed to create data directory: %w", err)
 			}
 			if err := viper.SafeWriteConfigAs("data/config.json"); err != nil {
-				log.Errorf("Failed to create default config: %v", err)
+				return fmt.Errorf("failed to create default config: %w", err)
 			}
 		} else {
 			return fmt.Errorf("error reading config file: %w", err)

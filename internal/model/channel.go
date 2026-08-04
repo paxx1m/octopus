@@ -48,7 +48,7 @@ type CustomHeader struct {
 
 type ChannelKey struct {
 	ID               int     `json:"id" gorm:"primaryKey"`
-	ChannelID        int     `json:"channel_id"`
+	ChannelID        int     `json:"channel_id" gorm:"index"`
 	Enabled          bool    `json:"enabled" gorm:"default:true"`
 	ChannelKey       string  `json:"channel_key"`
 	StatusCode       int     `json:"status_code"`

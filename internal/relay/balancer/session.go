@@ -49,3 +49,30 @@ func SetSticky(apiKeyID int, requestModel string, channelID, keyID int) {
 		Timestamp:    time.Now(),
 	})
 }
+
+// ClearSticky 清除指定会话的粘性记录
+func ClearSticky(apiKeyID int, requestModel string) {
+	globalSession.Delete(sessionKey(apiKeyID, requestModel))
+}
+
+// ClearStickyByKey 清除所有引用指定 channel key 的粘性记录
+func ClearStickyByKey(channelKeyID int) {
+	globalSession.Range(func(k, v any) bool {
+		entry := v.(*SessionEntry)
+		if entry.ChannelKeyID == channelKeyID {
+			globalSession.Delete(k)
+		}
+		return true
+	})
+}
+
+// ClearStickyByChannel 清除所有引用指定 channel 的粘性记录
+func ClearStickyByChannel(channelID int) {
+	globalSession.Range(func(k, v any) bool {
+		entry := v.(*SessionEntry)
+		if entry.ChannelID == channelID {
+			globalSession.Delete(k)
+		}
+		return true
+	})
+}

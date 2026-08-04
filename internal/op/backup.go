@@ -67,8 +67,21 @@ func DBExportAll(ctx context.Context, includeLogs, includeStats bool) (*model.DB
 	}
 
 	if includeLogs {
-		if err := conn.Find(&d.RelayLogs).Error; err != nil {
-			return nil, fmt.Errorf("export relay_logs: %w", err)
+		const batchSize = 1000
+		var offset int
+		for {
+			var batch []model.RelayLog
+			if err := conn.Order("id ASC").Offset(offset).Limit(batchSize).Find(&batch).Error; err != nil {
+				return nil, fmt.Errorf("export relay_logs: %w", err)
+			}
+			if len(batch) == 0 {
+				break
+			}
+			d.RelayLogs = append(d.RelayLogs, batch...)
+			if len(batch) < batchSize {
+				break
+			}
+			offset += batchSize
 		}
 	}
 

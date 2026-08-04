@@ -101,7 +101,9 @@ func runMigrationsWithRecord(db *gorm.DB, migrations []Migration) error {
 
 		// 执行迁移
 		if err := m.Up(db); err != nil {
-			upsertMigrationRecord(db, m.Version, MigrationRecordStatusFailed)
+			if recErr := upsertMigrationRecord(db, m.Version, MigrationRecordStatusFailed); recErr != nil {
+				return fmt.Errorf("failed to run migration %d: %w (also failed to record status: %v)", m.Version, err, recErr)
+			}
 			statusByVersion[m.Version] = MigrationRecordStatusFailed
 			return fmt.Errorf("failed to run migration %d: %w", m.Version, err)
 		}

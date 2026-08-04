@@ -25,7 +25,7 @@ type ChannelAttempt struct {
 
 type RelayLog struct {
 	ID                int64            `json:"id" gorm:"primaryKey;autoIncrement:false"` // Snowflake ID
-	Time              int64            `json:"time"`                                     // 时间戳（秒）
+	Time              int64            `json:"time" gorm:"index"`                        // 时间戳（秒）
 	RequestModelName  string           `json:"request_model_name"`                       // 请求模型名称
 	RequestAPIKeyName string           `json:"request_api_key_name"`                     // 请求使用的 API Key 名称
 	ChannelId         int              `json:"channel"`                                  // 实际使用的渠道ID
@@ -42,3 +42,6 @@ type RelayLog struct {
 	Attempts          []ChannelAttempt `json:"attempts" gorm:"serializer:json"`          // 所有尝试记录
 	TotalAttempts     int              `json:"total_attempts"`                           // 总尝试次数
 }
+
+// RelayLogContentMaxLen caps stored request/response body size in logs.
+const RelayLogContentMaxLen = 64 * 1024

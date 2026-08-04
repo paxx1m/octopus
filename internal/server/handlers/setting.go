@@ -77,6 +77,13 @@ func setSetting(c *gin.Context) {
 			return
 		}
 		task.Update(string(setting.Key), time.Duration(hours)*time.Hour)
+	case model.SettingKeyStatsSaveInterval:
+		minutes, err := strconv.Atoi(setting.Value)
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		task.Update(task.TaskStatsSave, time.Duration(minutes)*time.Minute)
 	}
 	resp.Success(c, setting)
 }
@@ -139,7 +146,10 @@ func importDB(c *gin.Context) {
 		return
 	}
 
-	_ = op.InitCache()
+	if err := op.ReloadCache(); err != nil {
+		resp.Error(c, http.StatusInternalServerError, "import ok but cache reload failed: "+err.Error())
+		return
+	}
 
 	resp.Success(c, result)
 }

@@ -44,16 +44,23 @@ func DefaultSettings() []Setting {
 func (s *Setting) Validate() error {
 	switch s.Key {
 	case SettingKeyModelInfoUpdateInterval, SettingKeySyncLLMInterval, SettingKeyRelayLogKeepPeriod,
-		SettingKeyCircuitBreakerThreshold, SettingKeyCircuitBreakerCooldown, SettingKeyCircuitBreakerMaxCooldown:
-		_, err := strconv.Atoi(s.Value)
+		SettingKeyCircuitBreakerThreshold, SettingKeyCircuitBreakerCooldown, SettingKeyCircuitBreakerMaxCooldown,
+		SettingKeyStatsSaveInterval:
+		v, err := strconv.Atoi(s.Value)
 		if err != nil {
-			return fmt.Errorf("model info update interval must be an integer")
+			return fmt.Errorf("%s must be an integer", s.Key)
+		}
+		if v < 0 {
+			return fmt.Errorf("%s must be non-negative", s.Key)
 		}
 		return nil
 	case SettingKeyRelayLogKeepEnabled:
 		if s.Value != "true" && s.Value != "false" {
 			return fmt.Errorf("relay log keep enabled must be true or false")
 		}
+		return nil
+	case SettingKeyCORSAllowOrigins:
+		// empty = deny all cross-origin; "*" = allow all; otherwise comma-separated origins
 		return nil
 	case SettingKeyProxyURL:
 		if s.Value == "" {
@@ -69,7 +76,7 @@ func (s *Setting) Validate() error {
 			"socks5": true,
 		}
 		if !validSchemes[parsedURL.Scheme] {
-			return fmt.Errorf("proxy URL scheme must be http, https, socks, or socks5")
+			return fmt.Errorf("proxy URL scheme must be http, https, or socks5")
 		}
 		if parsedURL.Host == "" {
 			return fmt.Errorf("proxy URL must have a host")

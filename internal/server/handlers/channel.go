@@ -10,6 +10,7 @@ import (
 	"github.com/bestruirui/octopus/internal/helper"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/relay/balancer"
 	"github.com/bestruirui/octopus/internal/server/middleware"
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
@@ -105,6 +106,14 @@ func updateChannel(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	for _, keyID := range req.KeysToDelete {
+		balancer.ClearStickyByKey(keyID)
+	}
+	for _, ku := range req.KeysToUpdate {
+		if ku.Enabled != nil && !*ku.Enabled {
+			balancer.ClearStickyByKey(ku.ID)
+		}
+	}
 	stats := op.StatsChannelGet(channel.ID)
 	channel.Stats = &stats
 	go func(channel *model.Channel) {
@@ -132,6 +141,9 @@ func enableChannel(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if !request.Enabled {
+		balancer.ClearStickyByChannel(request.ID)
+	}
 	resp.Success(c, nil)
 }
 
@@ -146,6 +158,7 @@ func deleteChannel(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	balancer.ClearStickyByChannel(idNum)
 	resp.Success(c, nil)
 }
 func fetchModel(c *gin.Context) {

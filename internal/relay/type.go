@@ -16,6 +16,7 @@ type relayRun struct {
 	metrics         *RelayMetrics
 	iter            *balancer.Iterator
 	group           dbmodel.Group
+	stickyKeyID     int
 }
 
 // relayAttempt 保存一次上游通道尝试的状态。

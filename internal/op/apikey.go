@@ -59,21 +59,22 @@ func APIKeyGetByAPIKey(apiKey string, ctx context.Context) (model.APIKey, error)
 }
 
 func APIKeyDelete(id int, ctx context.Context) error {
-	k := model.APIKey{
-		ID: id,
+	existing, ok := apiKeyCache.Get(id)
+	if !ok {
+		return fmt.Errorf("API key not found")
 	}
 	if err := StatsAPIKeyDel(id); err != nil {
 		return fmt.Errorf("failed to delete stats API key: %v", err)
 	}
-	result := db.GetDB().WithContext(ctx).Delete(&k)
+	result := db.GetDB().WithContext(ctx).Delete(&model.APIKey{}, id)
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("API key not found")
 	}
 	if result.Error != nil {
 		return fmt.Errorf("failed to delete API key: %w", result.Error)
 	}
-	apiKeyCache.Del(k.ID)
-	apiKeyIDMap.Del(k.APIKey)
+	apiKeyCache.Del(id)
+	apiKeyIDMap.Del(existing.APIKey)
 	return nil
 }
 
@@ -82,6 +83,8 @@ func apiKeyRefreshCache(ctx context.Context) error {
 	if err := db.GetDB().WithContext(ctx).Find(&apiKeys).Error; err != nil {
 		return err
 	}
+	apiKeyCache.Clear()
+	apiKeyIDMap.Clear()
 	for _, apiKey := range apiKeys {
 		apiKeyCache.Set(apiKey.ID, apiKey)
 		apiKeyIDMap.Set(apiKey.APIKey, apiKey.ID)

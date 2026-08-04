@@ -25,6 +25,7 @@ type circuitEntry struct {
 	ConsecutiveFailures int64
 	LastFailureTime     time.Time
 	TripCount           int // 累计熔断触发次数（用于指数退避）
+	ProbePending        bool
 	mu                  sync.Mutex
 }
 
@@ -84,11 +85,12 @@ func GetCooldown(tripCount int) time.Duration {
 
 // IsTripped 检查通道是否处于熔断状态
 // 返回 tripped=true 表示该通道应被跳过，remaining 为剩余冷却时间
-func IsTripped(channelID, keyID int, modelName string) (tripped bool, remaining time.Duration) {
+// 返回 probe=true 表示本次请求是 HalfOpen 探测，调用方在未完成转发时必须调用 RecordProbeAborted
+func IsTripped(channelID, keyID int, modelName string) (tripped bool, remaining time.Duration, probe bool) {
 	key := circuitKey(channelID, keyID, modelName)
 	v, ok := globalBreaker.Load(key)
 	if !ok {
-		return false, 0 // 无记录，视为 Closed
+		return false, 0, false // 无记录，视为 Closed
 	}
 	entry := v.(*circuitEntry)
 
@@ -97,25 +99,47 @@ func IsTripped(channelID, keyID int, modelName string) (tripped bool, remaining 
 
 	switch entry.State {
 	case StateClosed:
-		return false, 0
+		return false, 0, false
 
 	case StateOpen:
 		cooldown := GetCooldown(entry.TripCount)
 		elapsed := time.Since(entry.LastFailureTime)
 		if elapsed >= cooldown {
 			entry.State = StateHalfOpen
+			entry.ProbePending = true
 			log.Infof("circuit breaker [%s] Open -> HalfOpen (cooldown %v elapsed)", key, cooldown)
-			return false, 0
+			return false, 0, true
 		}
 		// 仍在冷却中
-		return true, cooldown - elapsed
+		return true, cooldown - elapsed, false
 
 	case StateHalfOpen:
 		// 已有试探请求在进行中，拒绝其他请求
-		return true, 0
+		return true, 0, false
 
 	default:
-		return false, 0
+		return false, 0, false
+	}
+}
+
+// RecordProbeAborted 探测请求在真正转发前被跳过（无 key、disabled、adapter 失败等），
+// 将 HalfOpen 恢复为 Open，避免熔断器永久卡在 HalfOpen。
+func RecordProbeAborted(channelID, keyID int, modelName string) {
+	key := circuitKey(channelID, keyID, modelName)
+	v, ok := globalBreaker.Load(key)
+	if !ok {
+		return
+	}
+	entry := v.(*circuitEntry)
+
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+
+	if entry.State == StateHalfOpen && entry.ProbePending {
+		entry.State = StateOpen
+		entry.ProbePending = false
+		entry.LastFailureTime = time.Now()
+		log.Warnf("circuit breaker [%s] HalfOpen -> Open (probe aborted before forward)", key)
 	}
 }
 
@@ -139,6 +163,7 @@ func RecordSuccess(channelID, keyID int, modelName string) {
 	entry.State = StateClosed
 	entry.ConsecutiveFailures = 0
 	entry.TripCount = 0
+	entry.ProbePending = false
 }
 
 // RecordFailure 记录失败，可能触发熔断
@@ -150,6 +175,7 @@ func RecordFailure(channelID, keyID int, modelName string) {
 	defer entry.mu.Unlock()
 
 	entry.LastFailureTime = time.Now()
+	entry.ProbePending = false
 
 	switch entry.State {
 	case StateClosed:

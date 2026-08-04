@@ -3,6 +3,8 @@ package helper
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -49,30 +51,39 @@ func FetchModels(ctx context.Context, request model.Channel) ([]string, error) {
 	return fetchModel, nil
 }
 
+func doJSON(client *http.Client, req *http.Request, dest any) error {
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+	return json.NewDecoder(resp.Body).Decode(dest)
+}
+
 // refer: https://platform.openai.com/docs/api-reference/models/list
 func fetchOpenAIModels(client *http.Client, ctx context.Context, request model.Channel) ([]string, error) {
 	baseURL := transformer.NormalizeBaseURL(request.GetBaseUrl(), "v1")
 	if request.Type == model.ChannelTypeDoubao {
 		baseURL = transformer.NormalizeBaseURL(request.GetBaseUrl(), "v3")
 	}
-	req, _ := http.NewRequestWithContext(
+	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
 		baseURL+"/models",
 		nil,
 	)
-	req.Header.Set("Authorization", "Bearer "+request.GetChannelKey().ChannelKey)
-	applyCustomHeaders(req, request)
-
-	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	req.Header.Set("Authorization", "Bearer "+request.GetChannelKey().ChannelKey)
+	applyCustomHeaders(req, request)
 
 	var result model.OpenAIModelList
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := doJSON(client, req, &result); err != nil {
 		return nil, err
 	}
 
@@ -94,12 +105,15 @@ func fetchGeminiModels(client *http.Client, ctx context.Context, request model.C
 	}
 
 	for {
-		req, _ := http.NewRequestWithContext(
+		req, err := http.NewRequestWithContext(
 			ctx,
 			http.MethodGet,
 			baseURL+"/models",
 			nil,
 		)
+		if err != nil {
+			return nil, err
+		}
 		req.Header.Set("X-Goog-Api-Key", request.GetChannelKey().ChannelKey)
 		applyCustomHeaders(req, request)
 		if pageToken != "" {
@@ -108,15 +122,8 @@ func fetchGeminiModels(client *http.Client, ctx context.Context, request model.C
 			req.URL.RawQuery = q.Encode()
 		}
 
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-
 		var result model.GeminiModelList
-
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		if err := doJSON(client, req, &result); err != nil {
 			return nil, err
 		}
 
@@ -138,38 +145,30 @@ func fetchGeminiModels(client *http.Client, ctx context.Context, request model.C
 
 // refer: https://platform.claude.com/docs
 func fetchAnthropicModels(client *http.Client, ctx context.Context, request model.Channel) ([]string, error) {
-
 	var allModels []string
 	var afterID string
 	baseURL := transformer.NormalizeBaseURL(request.GetBaseUrl(), "v1")
 	for {
-
-		req, _ := http.NewRequestWithContext(
+		req, err := http.NewRequestWithContext(
 			ctx,
 			http.MethodGet,
 			baseURL+"/models",
 			nil,
 		)
+		if err != nil {
+			return nil, err
+		}
 		req.Header.Set("X-Api-Key", request.GetChannelKey().ChannelKey)
 		req.Header.Set("Anthropic-Version", "2023-06-01")
 		applyCustomHeaders(req, request)
-		// 设置多页参数
 		q := req.URL.Query()
-
 		if afterID != "" {
 			q.Set("after_id", afterID)
 		}
 		req.URL.RawQuery = q.Encode()
 
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-
 		var result model.AnthropicModelList
-
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		if err := doJSON(client, req, &result); err != nil {
 			return nil, err
 		}
 

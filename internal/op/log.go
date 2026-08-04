@@ -25,8 +25,23 @@ var relayLogFlushLock sync.Mutex
 var relayLogSubscribers = make(map[chan model.RelayLog]struct{})
 var relayLogSubscribersLock sync.RWMutex
 
-var relayLogStreamTokens = make(map[string]struct{})
+const relayLogStreamTokenTTL = 5 * time.Minute
+
+type streamTokenEntry struct {
+	expiresAt time.Time
+}
+
+var relayLogStreamTokens = make(map[string]streamTokenEntry)
 var relayLogStreamTokensLock sync.RWMutex
+
+func purgeExpiredStreamTokens() {
+	now := time.Now()
+	for t, e := range relayLogStreamTokens {
+		if now.After(e.expiresAt) {
+			delete(relayLogStreamTokens, t)
+		}
+	}
+}
 
 func RelayLogStreamTokenCreate() (string, error) {
 	bytes := make([]byte, 32)
@@ -36,23 +51,38 @@ func RelayLogStreamTokenCreate() (string, error) {
 	token := hex.EncodeToString(bytes)
 
 	relayLogStreamTokensLock.Lock()
-	relayLogStreamTokens[token] = struct{}{}
+	purgeExpiredStreamTokens()
+	relayLogStreamTokens[token] = streamTokenEntry{expiresAt: time.Now().Add(relayLogStreamTokenTTL)}
 	relayLogStreamTokensLock.Unlock()
 
 	return token, nil
 }
 
 func RelayLogStreamTokenVerify(token string) bool {
-	relayLogStreamTokensLock.RLock()
-	_, ok := relayLogStreamTokens[token]
-	relayLogStreamTokensLock.RUnlock()
-	return ok
+	relayLogStreamTokensLock.Lock()
+	defer relayLogStreamTokensLock.Unlock()
+	e, ok := relayLogStreamTokens[token]
+	if !ok {
+		return false
+	}
+	if time.Now().After(e.expiresAt) {
+		delete(relayLogStreamTokens, token)
+		return false
+	}
+	return true
 }
 
 func RelayLogStreamTokenRevoke(token string) {
 	relayLogStreamTokensLock.Lock()
 	delete(relayLogStreamTokens, token)
 	relayLogStreamTokensLock.Unlock()
+}
+
+func truncateLogContent(s string) string {
+	if len(s) <= model.RelayLogContentMaxLen {
+		return s
+	}
+	return s[:model.RelayLogContentMaxLen] + "...[truncated]"
 }
 
 func RelayLogSubscribe() chan model.RelayLog {
@@ -125,6 +155,8 @@ func RelayLogAdd(ctx context.Context, relayLog model.RelayLog) error {
 		maxSize = relayLogMaxSizeNoDB
 	}
 	relayLog.ID = snowflake.GenerateID()
+	relayLog.RequestContent = truncateLogContent(relayLog.RequestContent)
+	relayLog.ResponseContent = truncateLogContent(relayLog.ResponseContent)
 	go notifySubscribers(relayLog)
 
 	relayLogCacheLock.Lock()
