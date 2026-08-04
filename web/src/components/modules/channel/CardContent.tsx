@@ -11,7 +11,7 @@ import {
     Globe,
     Key
 } from 'lucide-react';
-import { useUpdateChannel, useDeleteChannel, type Channel, type UpdateChannelRequest } from '@/api/endpoints/channel';
+import { useUpdateChannel, useDeleteChannel, KeyMode, type Channel, type UpdateChannelRequest } from '@/api/endpoints/channel';
 import {
     MorphingDialogTitle,
     MorphingDialogDescription,
@@ -50,14 +50,19 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                 last_use_time_stamp: k.last_use_time_stamp,
                 total_cost: k.total_cost,
                 remark: k.remark,
+                weight: k.weight ?? 1,
+                rate_limit_cooldown_sec: k.rate_limit_cooldown_sec ?? '',
             }))
-            : [{ enabled: true, channel_key: '', remark: '' }],
+            : [{ enabled: true, channel_key: '', remark: '', weight: 1, rate_limit_cooldown_sec: '' }],
         model: channel.model,
         custom_model: channel.custom_model,
         proxy: channel.proxy,
         auto_sync: channel.auto_sync,
         auto_group: channel.auto_group,
         match_regex: channel.match_regex ?? '',
+        key_mode: channel.key_mode || KeyMode.LeastCost,
+        rate_limit_cooldown_sec: channel.rate_limit_cooldown_sec ?? '',
+        allow_empty_key: channel.allow_empty_key ?? false,
     });
     const t = useTranslations('channel.detail');
 
@@ -115,28 +120,58 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
             req.match_regex = nextMatchRegex;
         }
 
+        if (formData.key_mode !== (channel.key_mode || KeyMode.LeastCost)) {
+            req.key_mode = formData.key_mode;
+        }
+        if ((formData.allow_empty_key ?? false) !== (channel.allow_empty_key ?? false)) {
+            req.allow_empty_key = formData.allow_empty_key;
+        }
+        const nextCooldown = formData.rate_limit_cooldown_sec === '' ? null : Number(formData.rate_limit_cooldown_sec);
+        const curCooldown = channel.rate_limit_cooldown_sec ?? null;
+        if (nextCooldown !== curCooldown) {
+            req.rate_limit_cooldown_sec = nextCooldown;
+        }
+
         const originalKeys = channel.keys;
         const originalByID = new Map(originalKeys.map((k) => [k.id, k]));
-        const nextKeys = formData.keys ?? [];
+        const nextKeys = formData.allow_empty_key ? [] : (formData.keys ?? []);
 
         const nextIDs = new Set(nextKeys.filter((k) => typeof k.id === 'number').map((k) => k.id as number));
         const keys_to_delete = originalKeys.filter((k) => !nextIDs.has(k.id)).map((k) => k.id);
 
         const keys_to_add = nextKeys
             .filter((k) => !k.id && k.channel_key.trim())
-            .map((k) => ({ enabled: k.enabled, channel_key: k.channel_key, remark: k.remark ?? '' }));
+            .map((k) => ({
+                enabled: k.enabled,
+                channel_key: k.channel_key,
+                remark: k.remark ?? '',
+                weight: k.weight && k.weight > 0 ? k.weight : 1,
+                rate_limit_cooldown_sec:
+                    k.rate_limit_cooldown_sec === '' || k.rate_limit_cooldown_sec === undefined
+                        ? null
+                        : Number(k.rate_limit_cooldown_sec),
+            }));
 
-        const keys_to_update = nextKeys
+        type KeyUpdate = NonNullable<UpdateChannelRequest['keys_to_update']>[number];
+        const keys_to_update: KeyUpdate[] = nextKeys
             .filter((k) => typeof k.id === 'number' && originalByID.has(k.id as number))
             .map((k) => {
                 const orig = originalByID.get(k.id as number)!;
-                const u: { id: number; enabled?: boolean; channel_key?: string; remark?: string } = { id: k.id as number };
+                const u: KeyUpdate = { id: k.id as number };
                 if (k.enabled !== orig.enabled) u.enabled = k.enabled;
                 if (k.channel_key !== orig.channel_key) u.channel_key = k.channel_key;
                 if ((k.remark ?? '') !== orig.remark) u.remark = k.remark ?? '';
+                const nextW = k.weight && k.weight > 0 ? k.weight : 1;
+                if (nextW !== (orig.weight || 1)) u.weight = nextW;
+                const nextKeyCd =
+                    k.rate_limit_cooldown_sec === '' || k.rate_limit_cooldown_sec === undefined
+                        ? null
+                        : Number(k.rate_limit_cooldown_sec);
+                const curKeyCd = orig.rate_limit_cooldown_sec ?? null;
+                if (nextKeyCd !== curKeyCd) u.rate_limit_cooldown_sec = nextKeyCd;
                 return Object.keys(u).length > 1 ? u : null;
             })
-            .filter((u) => u !== null) as Array<{ id: number; enabled?: boolean; channel_key?: string; remark?: string }>;
+            .filter((u): u is KeyUpdate => u !== null);
 
         if (keys_to_add.length > 0) req.keys_to_add = keys_to_add;
         if (keys_to_update.length > 0) req.keys_to_update = keys_to_update;

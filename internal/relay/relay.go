@@ -15,6 +15,7 @@ import (
 	dbmodel "github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/relay/balancer"
+	"github.com/bestruirui/octopus/internal/relay/keymanager"
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/gin-gonic/gin"
@@ -96,17 +97,8 @@ func (r *relayRun) run() {
 		default:
 		}
 
-		attempt, err := r.prepareAttempt()
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if attempt == nil {
-			continue
-		}
-
-		written, err := attempt.run()
-		if err == nil {
+		ok, written, err := r.tryChannel()
+		if ok {
 			r.metrics.Save(ctx, true, nil, r.iter.Attempts())
 			return
 		}
@@ -114,7 +106,9 @@ func (r *relayRun) run() {
 			r.metrics.Save(ctx, false, err, r.iter.Attempts())
 			return
 		}
-		lastErr = err
+		if err != nil {
+			lastErr = err
+		}
 	}
 
 	if lastErr == nil {
@@ -124,86 +118,126 @@ func (r *relayRun) run() {
 	resp.Error(r.c, http.StatusBadGateway, lastErr.Error())
 }
 
-func (r *relayRun) prepareAttempt() (*relayAttempt, error) {
+// tryChannel attempts the current group candidate channel with key fast-path / multi-key failover.
+// ok=true means success; written=true means response already sent (no more retries).
+func (r *relayRun) tryChannel() (ok, written bool, err error) {
 	item := r.iter.Item()
 	channel, err := op.ChannelGet(item.ChannelID, r.c.Request.Context())
 	if err != nil {
 		log.Warnf("failed to get channel %d: %v", item.ChannelID, err)
 		r.iter.Skip(item.ChannelID, 0, fmt.Sprintf("channel_%d", item.ChannelID), fmt.Sprintf("channel not found: %v", err))
-		return nil, err
+		return false, false, err
 	}
 	if !channel.Enabled {
 		r.iter.Skip(channel.ID, 0, channel.Name, "channel disabled")
-		return nil, nil
+		return false, false, nil
 	}
 
-	usedKey := channel.GetChannelKey()
-	// Prefer sticky key when session affinity selected this channel
+	// Fast path: no API key required
+	if channel.AllowEmptyKey {
+		return r.tryOneKey(channel, dbmodel.ChannelKey{}, item.ModelName)
+	}
+
+	// Prefer sticky key once at channel entry; if unavailable, clear and use manager.
+	exclude := map[int]struct{}{}
 	if sticky := r.stickyKeyID; sticky > 0 {
 		found := false
 		for _, k := range channel.Keys {
-			if k.ID == sticky && k.Enabled && k.ChannelKey != "" {
-				usedKey = k
+			if k.ID == sticky && keymanager.IsAvailable(channel, k, time.Now().Unix()) {
 				found = true
+				success, written, err := r.tryOneKey(channel, k, item.ModelName)
+				if success || written {
+					return success, written, err
+				}
+				exclude[k.ID] = struct{}{}
+				// continue with other keys in this channel
 				break
 			}
 		}
 		if !found {
-			// Sticky key gone or disabled; clear and fall back to cheapest key
 			balancer.ClearSticky(r.metrics.APIKeyID, r.metrics.RequestModel)
 			r.stickyKeyID = 0
 		}
 	}
-	if usedKey.ChannelKey == "" {
+
+	available := keymanager.ListAvailable(channel, exclude)
+	switch len(available) {
+	case 0:
 		r.iter.Skip(channel.ID, 0, channel.Name, "no available key")
-		return nil, nil
+		return false, false, nil
+	case 1:
+		// Single key: one attempt, no manager select loop
+		return r.tryOneKey(channel, available[0], item.ModelName)
+	default:
+		// Multi-key: select + failover within channel until exhausted
+		var lastErr error
+		for {
+			// Re-load channel so 429/disabled state from prior attempts is visible
+			if refreshed, getErr := op.ChannelGet(channel.ID, r.c.Request.Context()); getErr == nil {
+				channel = refreshed
+			}
+			key, okSel := keymanager.Select(channel, exclude)
+			if !okSel {
+				break
+			}
+			success, written, err := r.tryOneKey(channel, key, item.ModelName)
+			if success || written {
+				return success, written, err
+			}
+			if err != nil {
+				lastErr = err
+			}
+			exclude[key.ID] = struct{}{}
+		}
+		return false, false, lastErr
 	}
+}
+
+// tryOneKey builds outbound adapter, checks circuit breaker, and runs one forward attempt.
+func (r *relayRun) tryOneKey(channel *dbmodel.Channel, usedKey dbmodel.ChannelKey, modelName string) (ok, written bool, err error) {
 	skipped, isProbe := r.iter.SkipCircuitBreak(channel.ID, usedKey.ID, channel.Name)
 	if skipped {
-		return nil, nil
+		return false, false, nil
 	}
 
 	outAdapter, err := newOutbound(channel.Type, r.internalRequest, channel.GetBaseUrl(), usedKey.ChannelKey)
 	if err != nil {
 		if isProbe {
-			balancer.RecordProbeAborted(channel.ID, usedKey.ID, r.iter.Item().ModelName)
+			balancer.RecordProbeAborted(channel.ID, usedKey.ID, modelName)
 		}
 		r.iter.Skip(channel.ID, usedKey.ID, channel.Name, err.Error())
-		return nil, nil
+		return false, false, nil
 	}
 
-	// 每次尝试都把客户端模型改成本次候选的实际上游模型；重试时会被下一候选覆盖。
-	r.internalRequest.Model = item.ModelName
-	r.metrics.ActualModel = item.ModelName
+	r.internalRequest.Model = modelName
+	r.metrics.ActualModel = modelName
 	r.metrics.ParamOverride = ""
-	log.Infof("request model %s, mode: %d, forwarding to channel: %s model: %s (attempt %d/%d, sticky=%t)",
-		r.metrics.RequestModel, r.group.Mode, channel.Name, item.ModelName,
+	log.Infof("request model %s, mode: %d, forwarding to channel: %s model: %s key: %d (attempt %d/%d, sticky=%t)",
+		r.metrics.RequestModel, r.group.Mode, channel.Name, modelName, usedKey.ID,
 		r.iter.Index()+1, r.iter.Len(), r.iter.IsSticky())
 
-	return &relayAttempt{
+	ra := &relayAttempt{
 		relayRun:   r,
 		outAdapter: outAdapter,
 		channel:    channel,
 		usedKey:    usedKey,
-	}, nil
+	}
+	return ra.run()
 }
 
-// run 统一管理一次通道尝试的完整生命周期。
-func (ra *relayAttempt) run() (bool, error) {
+// run 统一管理一次通道+Key 尝试的完整生命周期。
+// 返回 (success, written, err)：success 表示转发成功；written 表示响应已写出不可再试。
+func (ra *relayAttempt) run() (bool, bool, error) {
 	span := ra.iter.StartAttempt(ra.channel.ID, ra.usedKey.ID, ra.channel.Name)
 
 	upstreamStatusCode, fwdErr := ra.forward()
 	if fwdErr == nil && upstreamStatusCode == 0 {
 		upstreamStatusCode = http.StatusOK
 	}
-	now := time.Now().Unix()
-	ra.usedKey.StatusCode = upstreamStatusCode
-	ra.usedKey.LastUseTimeStamp = now
 
 	if fwdErr == nil {
 		costDelta := ra.metrics.Stats.InputCost + ra.metrics.Stats.OutputCost
-		ra.usedKey.TotalCost += costDelta
-		_ = op.ChannelKeyApplyUpdate(ra.usedKey.ID, ra.channel.ID, upstreamStatusCode, now, costDelta)
+		keymanager.OnResult(ra.channel, ra.usedKey, upstreamStatusCode, costDelta)
 
 		span.End(dbmodel.AttemptSuccess, "")
 		op.StatsChannelUpdate(ra.channel.ID, dbmodel.StatsMetrics{
@@ -212,10 +246,10 @@ func (ra *relayAttempt) run() (bool, error) {
 		})
 		balancer.RecordSuccess(ra.channel.ID, ra.usedKey.ID, ra.internalRequest.Model)
 		balancer.SetSticky(ra.metrics.APIKeyID, ra.metrics.RequestModel, ra.channel.ID, ra.usedKey.ID)
-		return false, nil
+		return true, false, nil
 	}
 
-	_ = op.ChannelKeyApplyUpdate(ra.usedKey.ID, ra.channel.ID, upstreamStatusCode, now, 0)
+	keymanager.OnResult(ra.channel, ra.usedKey, upstreamStatusCode, 0)
 	span.End(dbmodel.AttemptFailed, fwdErr.Error())
 	op.StatsChannelUpdate(ra.channel.ID, dbmodel.StatsMetrics{
 		WaitTime:      span.Duration().Milliseconds(),
@@ -223,7 +257,8 @@ func (ra *relayAttempt) run() (bool, error) {
 	})
 	balancer.RecordFailure(ra.channel.ID, ra.usedKey.ID, ra.internalRequest.Model)
 
-	return ra.c.Writer.Written(), fmt.Errorf("channel %s failed: %v", ra.channel.Name, fwdErr)
+	written := ra.c.Writer.Written()
+	return false, written, fmt.Errorf("channel %s failed: %v", ra.channel.Name, fwdErr)
 }
 
 // parseRequest 解析并验证入站请求

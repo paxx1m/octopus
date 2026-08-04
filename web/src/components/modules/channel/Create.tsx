@@ -5,21 +5,21 @@ import {
     MorphingDialogDescription,
     useMorphingDialog,
 } from '@/components/ui/morphing-dialog';
-import { useCreateChannel, ChannelType, AutoGroupType } from '@/api/endpoints/channel';
+import { useCreateChannel, ChannelType, AutoGroupType, KeyMode } from '@/api/endpoints/channel';
 import { useTranslations } from 'use-intl';
 import { ChannelForm, type ChannelFormData } from './Form';
 
 export function CreateDialogContent() {
     const { setIsOpen } = useMorphingDialog();
     const createChannel = useCreateChannel();
-    const [formData, setFormData] = useState<ChannelFormData>({
+    const emptyForm = (): ChannelFormData => ({
         name: '',
         type: ChannelType.OpenAIChat,
         base_urls: [{ url: '', delay: 0 }],
         custom_header: [],
         channel_proxy: '',
         param_override: '',
-        keys: [{ enabled: true, channel_key: '', remark: '' }],
+        keys: [{ enabled: true, channel_key: '', remark: '', weight: 1, rate_limit_cooldown_sec: '' }],
         model: '',
         custom_model: '',
         auto_sync: false,
@@ -27,7 +27,11 @@ export function CreateDialogContent() {
         enabled: true,
         proxy: false,
         match_regex: '',
+        key_mode: KeyMode.LeastCost,
+        rate_limit_cooldown_sec: '',
+        allow_empty_key: false,
     });
+    const [formData, setFormData] = useState<ChannelFormData>(emptyForm);
     const t = useTranslations('channel.create');
 
     const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
@@ -36,9 +40,20 @@ export function CreateDialogContent() {
             url: u.url.trim(),
             delay: Number(u.delay || 0),
         }));
-        const normalizedKeys = formData.keys
-            .filter((k) => k.channel_key.trim())
-            .map((k) => ({ enabled: k.enabled, channel_key: k.channel_key, remark: k.remark ?? '' }));
+        const normalizedKeys = formData.allow_empty_key
+            ? []
+            : formData.keys
+                .filter((k) => k.channel_key.trim())
+                .map((k) => ({
+                    enabled: k.enabled,
+                    channel_key: k.channel_key,
+                    remark: k.remark ?? '',
+                    weight: k.weight && k.weight > 0 ? k.weight : 1,
+                    rate_limit_cooldown_sec:
+                        k.rate_limit_cooldown_sec === '' || k.rate_limit_cooldown_sec === undefined
+                            ? null
+                            : Number(k.rate_limit_cooldown_sec),
+                }));
         const normalizedHeaders = (formData.custom_header ?? [])
             .map((h) => ({ header_key: h.header_key.trim(), header_value: h.header_value }))
             .filter((h) => h.header_key && h.header_value !== '');
@@ -61,25 +76,14 @@ export function CreateDialogContent() {
                 channel_proxy: channelProxy,
                 param_override: paramOverride,
                 match_regex: formData.match_regex.trim(),
+                key_mode: formData.key_mode,
+                rate_limit_cooldown_sec:
+                    formData.rate_limit_cooldown_sec === '' ? null : Number(formData.rate_limit_cooldown_sec),
+                allow_empty_key: formData.allow_empty_key,
             },
             {
                 onSuccess: () => {
-                    setFormData({
-                        name: '',
-                        type: ChannelType.OpenAIChat,
-                        base_urls: [{ url: '', delay: 0 }],
-                        custom_header: [],
-                        channel_proxy: '',
-                        param_override: '',
-                        keys: [{ enabled: true, channel_key: '', remark: '' }],
-                        model: '',
-                        custom_model: '',
-                        auto_sync: false,
-                        auto_group: AutoGroupType.None,
-                        enabled: true,
-                        proxy: false,
-                        match_regex: '',
-                    });
+                    setFormData(emptyForm());
                     setIsOpen(false);
                 }
             });

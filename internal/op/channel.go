@@ -45,6 +45,46 @@ func ChannelCreate(channel *model.Channel, ctx context.Context) error {
 	return nil
 }
 
+// ChannelKeySetEnabled 立即将 Key 的 Enabled 写入缓存与数据库（用于 401/403 自动禁用）。
+func ChannelKeySetEnabled(keyID, channelID int, enabled bool) error {
+	if keyID == 0 || channelID == 0 {
+		return fmt.Errorf("invalid channel key")
+	}
+
+	mu := channelLock(channelID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	ch, ok := channelCache.Get(channelID)
+	if !ok {
+		return fmt.Errorf("channel not found")
+	}
+
+	if err := db.GetDB().Model(&model.ChannelKey{}).
+		Where("id = ? AND channel_id = ?", keyID, channelID).
+		Update("enabled", enabled).Error; err != nil {
+		return err
+	}
+
+	if len(ch.Keys) > 0 {
+		keys := make([]model.ChannelKey, len(ch.Keys))
+		copy(keys, ch.Keys)
+		for i := range keys {
+			if keys[i].ID == keyID {
+				keys[i].Enabled = enabled
+				channelKeyCache.Set(keyID, keys[i])
+				break
+			}
+		}
+		ch.Keys = keys
+		channelCache.Set(channelID, ch)
+	} else if k, ok := channelKeyCache.Get(keyID); ok {
+		k.Enabled = enabled
+		channelKeyCache.Set(keyID, k)
+	}
+	return nil
+}
+
 // ChannelKeyApplyUpdate 原子地应用运行时 key 状态与费用增量（不落库，标记 dirty）。
 func ChannelKeyApplyUpdate(keyID, channelID, statusCode int, lastUseTimeStamp int64, costDelta float64) error {
 	if keyID == 0 || channelID == 0 {
@@ -268,6 +308,18 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 		selectFields = append(selectFields, "match_regex")
 		updates.MatchRegex = req.MatchRegex
 	}
+	if req.KeyMode != nil {
+		selectFields = append(selectFields, "key_mode")
+		updates.KeyMode = *req.KeyMode
+	}
+	if req.RateLimitCooldownSec != nil {
+		selectFields = append(selectFields, "rate_limit_cooldown_sec")
+		updates.RateLimitCooldownSec = req.RateLimitCooldownSec
+	}
+	if req.AllowEmptyKey != nil {
+		selectFields = append(selectFields, "allow_empty_key")
+		updates.AllowEmptyKey = *req.AllowEmptyKey
+	}
 
 	// 只有当有字段需要更新时才执行 UPDATE
 	if len(selectFields) > 0 {
@@ -298,6 +350,12 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 			if ku.Remark != nil {
 				updates["remark"] = *ku.Remark
 			}
+			if ku.Weight != nil {
+				updates["weight"] = *ku.Weight
+			}
+			if ku.RateLimitCooldownSec != nil {
+				updates["rate_limit_cooldown_sec"] = *ku.RateLimitCooldownSec
+			}
 			if len(updates) == 0 {
 				continue
 			}
@@ -314,11 +372,17 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 	if len(req.KeysToAdd) > 0 {
 		newKeys := make([]model.ChannelKey, 0, len(req.KeysToAdd))
 		for _, ka := range req.KeysToAdd {
+			weight := ka.Weight
+			if weight <= 0 {
+				weight = 1
+			}
 			newKeys = append(newKeys, model.ChannelKey{
-				ChannelID:  req.ID,
-				Enabled:    ka.Enabled,
-				ChannelKey: ka.ChannelKey,
-				Remark:     ka.Remark,
+				ChannelID:            req.ID,
+				Enabled:              ka.Enabled,
+				ChannelKey:           ka.ChannelKey,
+				Remark:               ka.Remark,
+				Weight:               weight,
+				RateLimitCooldownSec: ka.RateLimitCooldownSec,
 			})
 		}
 		if err := tx.Create(&newKeys).Error; err != nil {

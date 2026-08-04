@@ -163,6 +163,11 @@
             "label": "Stats Save Interval",
             "placeholder": "Enter interval in minutes"
         },
+        "channelKeyRateLimitCooldown": {
+            "label": "Key 429 default cooldown (sec)",
+            "placeholder": "Default 300",
+            "hint": "Used when channel/key has no override; Key > Channel > Global"
+        },
         "corsAllowOrigins": {
             "label": "CORS Allowed Origins",
             "hint": "Empty = deny all, * = allow all",
@@ -541,7 +546,19 @@
             "autoGroupRegex": "Regex",
             "matchRegex": "Match Regex",
             "matchRegexPlaceholder": "Optional: regex pattern to match request model names",
-            "remark": "Remark"
+            "remark": "Remark",
+            "allowEmptyKey": "No API Key required",
+            "allowEmptyKeyHint": "When enabled, no key is sent — for local/private upstreams without auth",
+            "keyMode": "Key selection strategy",
+            "keyModeLeastCost": "Least cost",
+            "keyModeRoundRobin": "Round-robin",
+            "keyModeRandom": "Random",
+            "keyModeFailover": "Failover",
+            "keyModeWeighted": "Weighted",
+            "rateLimitCooldown": "429 cooldown (sec)",
+            "rateLimitCooldownPlaceholder": "Empty = global default",
+            "weight": "Weight",
+            "keyCooldown": "Key cooldown"
         }
     }
 }

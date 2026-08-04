@@ -163,6 +163,11 @@
             "label": "统计保存周期（分钟）",
             "placeholder": "请输入周期（分钟）"
         },
+        "channelKeyRateLimitCooldown": {
+            "label": "Key 429 默认冷却（秒）",
+            "placeholder": "默认 300",
+            "hint": "渠道/Key 未单独配置时使用；Key > 渠道 > 全局"
+        },
         "corsAllowOrigins": {
             "label": "CORS 跨域白名单",
             "hint": "为空禁止跨域，* 允许所有",
@@ -541,7 +546,19 @@
             "autoGroupRegex": "正则匹配",
             "matchRegex": "匹配正则",
             "matchRegexPlaceholder": "可选：用于匹配请求模型名称的正则表达式",
-            "remark": "备注"
+            "remark": "备注",
+            "allowEmptyKey": "无需 API Key",
+            "allowEmptyKeyHint": "开启后不发送密钥，适用于本地/内网无需鉴权的上游",
+            "keyMode": "Key 选择策略",
+            "keyModeLeastCost": "最少费用",
+            "keyModeRoundRobin": "轮询",
+            "keyModeRandom": "随机",
+            "keyModeFailover": "故障转移",
+            "keyModeWeighted": "加权",
+            "rateLimitCooldown": "429 冷却（秒）",
+            "rateLimitCooldownPlaceholder": "空=使用全局默认",
+            "weight": "权重",
+            "keyCooldown": "Key 冷却"
         }
     }
 }

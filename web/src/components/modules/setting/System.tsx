@@ -16,16 +16,19 @@ export function SettingSystem() {
     const [statsSaveInterval, setStatsSaveInterval] = useState('');
     const [corsAllowOrigins, setCorsAllowOrigins] = useState('');
     const [corsInputValue, setCorsInputValue] = useState('');
+    const [keyRateLimitCooldown, setKeyRateLimitCooldown] = useState('');
 
     const initialProxyUrl = useRef('');
     const initialStatsSaveInterval = useRef('');
     const initialCorsAllowOrigins = useRef('');
+    const initialKeyRateLimitCooldown = useRef('');
 
     useEffect(() => {
         if (settings) {
             const proxy = settings.find(s => s.key === SettingKey.ProxyURL);
             const interval = settings.find(s => s.key === SettingKey.StatsSaveInterval);
             const cors = settings.find(s => s.key === SettingKey.CORSAllowOrigins);
+            const keyCd = settings.find(s => s.key === SettingKey.ChannelKeyRateLimitCooldown);
             if (proxy) {
                 queueMicrotask(() => setProxyUrl(proxy.value));
                 initialProxyUrl.current = proxy.value;
@@ -37,6 +40,10 @@ export function SettingSystem() {
             if (cors) {
                 queueMicrotask(() => setCorsAllowOrigins(cors.value));
                 initialCorsAllowOrigins.current = cors.value;
+            }
+            if (keyCd) {
+                queueMicrotask(() => setKeyRateLimitCooldown(keyCd.value));
+                initialKeyRateLimitCooldown.current = keyCd.value;
             }
         }
     }, [settings]);
@@ -53,6 +60,8 @@ export function SettingSystem() {
                     initialStatsSaveInterval.current = value;
                 } else if (key === SettingKey.CORSAllowOrigins) {
                     initialCorsAllowOrigins.current = value;
+                } else if (key === SettingKey.ChannelKeyRateLimitCooldown) {
+                    initialKeyRateLimitCooldown.current = value;
                 }
             }
         });
@@ -146,6 +155,32 @@ export function SettingSystem() {
                     onChange={(e) => setStatsSaveInterval(e.target.value)}
                     onBlur={() => handleSave('stats_save_interval', statsSaveInterval, initialStatsSaveInterval.current)}
                     placeholder={t('statsSaveInterval.placeholder')}
+                    className="w-48 rounded-xl"
+                />
+            </div>
+
+            {/* 渠道 Key 429 默认冷却 */}
+            <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                    <Clock className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-sm font-medium">{t('channelKeyRateLimitCooldown.label')}</span>
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <HelpCircle className="size-4 text-muted-foreground cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                {t('channelKeyRateLimitCooldown.hint')}
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                </div>
+                <Input
+                    type="number"
+                    value={keyRateLimitCooldown}
+                    onChange={(e) => setKeyRateLimitCooldown(e.target.value)}
+                    onBlur={() => handleSave(SettingKey.ChannelKeyRateLimitCooldown, keyRateLimitCooldown, initialKeyRateLimitCooldown.current)}
+                    placeholder={t('channelKeyRateLimitCooldown.placeholder')}
                     className="w-48 rounded-xl"
                 />
             </div>

@@ -1,4 +1,4 @@
-import { AutoGroupType, ChannelType, type Channel, useFetchModel } from '@/api/endpoints/channel';
+import { AutoGroupType, ChannelType, KeyMode, type Channel, useFetchModel } from '@/api/endpoints/channel';
 import {
     Select,
     SelectContent,
@@ -23,6 +23,8 @@ export interface ChannelKeyFormItem {
     last_use_time_stamp?: number;
     total_cost?: number;
     remark?: string;
+    weight?: number;
+    rate_limit_cooldown_sec?: number | '';
 }
 
 export interface ChannelFormData {
@@ -40,6 +42,9 @@ export interface ChannelFormData {
     auto_sync: boolean;
     auto_group: AutoGroupType;
     match_regex: string;
+    key_mode: KeyMode;
+    rate_limit_cooldown_sec: number | '';
+    allow_empty_key: boolean;
 }
 
 export interface ChannelFormProps {
@@ -81,8 +86,8 @@ export function ChannelForm({
             onFormDataChange({ ...formData, base_urls: [{ url: '', delay: 0 }] });
             return;
         }
-        if (!formData.keys || formData.keys.length === 0) {
-            onFormDataChange({ ...formData, keys: [{ enabled: true, channel_key: '' }] });
+        if (!formData.allow_empty_key && (!formData.keys || formData.keys.length === 0)) {
+            onFormDataChange({ ...formData, keys: [{ enabled: true, channel_key: '', weight: 1 }] });
             return;
         }
         if (!formData.custom_header || formData.custom_header.length === 0) {
@@ -112,7 +117,8 @@ export function ChannelForm({
     };
 
     const handleRefreshModels = async () => {
-        if (!formData.base_urls?.[0]?.url || !effectiveKey) return;
+        if (!formData.base_urls?.[0]?.url) return;
+        if (!formData.allow_empty_key && !effectiveKey) return;
         fetchModel.mutate(
             {
                 type: formData.type,
@@ -169,7 +175,7 @@ export function ChannelForm({
     const handleAddKey = () => {
         onFormDataChange({
             ...formData,
-            keys: [...formData.keys, { enabled: true, channel_key: '' }],
+            keys: [...formData.keys, { enabled: true, channel_key: '', weight: 1, rate_limit_cooldown_sec: '' }],
         });
     };
 
@@ -305,59 +311,138 @@ export function ChannelForm({
                 </div>
             </div>
 
-            <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-card-foreground">
-                        {t('apiKey')} {formData.keys.length > 0 ? `(${formData.keys.length})` : ''}
-                    </label>
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleAddKey}
-                        className="h-6 px-2 text-xs text-muted-foreground/70 hover:text-muted-foreground hover:bg-transparent"
-                    >
-                        <Plus className="h-3 w-3 mr-1" />
-                        {t('add')}
-                    </Button>
+            <div className="flex items-center justify-between rounded-xl border border-border/50 bg-muted/20 px-4 py-3">
+                <div className="space-y-0.5">
+                    <label className="text-sm font-medium text-card-foreground">{t('allowEmptyKey')}</label>
+                    <p className="text-xs text-muted-foreground">{t('allowEmptyKeyHint')}</p>
                 </div>
-                <div className="space-y-2">
-                    {(formData.keys ?? []).map((k, idx) => (
-                        <div key={k.id ?? `new-${idx}`} className="flex items-center gap-2">
+                <Switch
+                    checked={formData.allow_empty_key}
+                    onCheckedChange={(checked) => onFormDataChange({ ...formData, allow_empty_key: checked })}
+                />
+            </div>
+
+            {!formData.allow_empty_key && (
+                <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label htmlFor={`${idPrefix}-key-mode`} className="text-sm font-medium text-card-foreground">
+                                {t('keyMode')}
+                            </label>
+                            <Select
+                                value={String(formData.key_mode)}
+                                onValueChange={(value) => onFormDataChange({ ...formData, key_mode: Number(value) as KeyMode })}
+                            >
+                                <SelectTrigger id={`${idPrefix}-key-mode`} className="rounded-xl w-full border border-border px-4 py-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className='rounded-xl'>
+                                    <SelectItem className='rounded-xl' value={String(KeyMode.LeastCost)}>{t('keyModeLeastCost')}</SelectItem>
+                                    <SelectItem className='rounded-xl' value={String(KeyMode.RoundRobin)}>{t('keyModeRoundRobin')}</SelectItem>
+                                    <SelectItem className='rounded-xl' value={String(KeyMode.Random)}>{t('keyModeRandom')}</SelectItem>
+                                    <SelectItem className='rounded-xl' value={String(KeyMode.Failover)}>{t('keyModeFailover')}</SelectItem>
+                                    <SelectItem className='rounded-xl' value={String(KeyMode.Weighted)}>{t('keyModeWeighted')}</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <label htmlFor={`${idPrefix}-rate-limit`} className="text-sm font-medium text-card-foreground">
+                                {t('rateLimitCooldown')}
+                            </label>
                             <Input
-                                type="text"
-                                value={k.channel_key}
-                                onChange={(e) => handleUpdateKey(idx, { channel_key: e.target.value })}
-                                placeholder={t('apiKey')}
-                                required={idx === 0}
-                                className="rounded-xl flex-1"
+                                id={`${idPrefix}-rate-limit`}
+                                type="number"
+                                min={0}
+                                value={formData.rate_limit_cooldown_sec === '' ? '' : formData.rate_limit_cooldown_sec}
+                                onChange={(e) => {
+                                    const v = e.target.value;
+                                    onFormDataChange({
+                                        ...formData,
+                                        rate_limit_cooldown_sec: v === '' ? '' : Number(v),
+                                    });
+                                }}
+                                placeholder={t('rateLimitCooldownPlaceholder')}
+                                className="rounded-xl"
                             />
-                            <Input
-                                type="text"
-                                value={k.remark ?? ''}
-                                onChange={(e) => handleUpdateKey(idx, { remark: e.target.value })}
-                                placeholder={t('remark')}
-                                className="rounded-xl w-32"
-                            />
-                            <Switch
-                                checked={k.enabled}
-                                onCheckedChange={(checked) => handleUpdateKey(idx, { enabled: checked })}
-                            />
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                            <label className="text-sm font-medium text-card-foreground">
+                                {t('apiKey')} {formData.keys.length > 0 ? `(${formData.keys.length})` : ''}
+                            </label>
                             <Button
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => handleRemoveKey(idx)}
-                                disabled={(formData.keys ?? []).length <= 1}
-                                className="h-8 w-8 p-0 rounded-xl text-muted-foreground hover:text-destructive hover:bg-transparent disabled:opacity-40"
-                                title="Remove"
+                                onClick={handleAddKey}
+                                className="h-6 px-2 text-xs text-muted-foreground/70 hover:text-muted-foreground hover:bg-transparent"
                             >
-                                <X className="h-4 w-4" />
+                                <Plus className="h-3 w-3 mr-1" />
+                                {t('add')}
                             </Button>
                         </div>
-                    ))}
-                </div>
-            </div>
+                        <div className="space-y-2">
+                            {(formData.keys ?? []).map((k, idx) => (
+                                <div key={k.id ?? `new-${idx}`} className="flex flex-wrap items-center gap-2">
+                                    <Input
+                                        type="text"
+                                        value={k.channel_key}
+                                        onChange={(e) => handleUpdateKey(idx, { channel_key: e.target.value })}
+                                        placeholder={t('apiKey')}
+                                        required={idx === 0}
+                                        className="rounded-xl flex-1 min-w-[8rem]"
+                                    />
+                                    <Input
+                                        type="text"
+                                        value={k.remark ?? ''}
+                                        onChange={(e) => handleUpdateKey(idx, { remark: e.target.value })}
+                                        placeholder={t('remark')}
+                                        className="rounded-xl w-24"
+                                    />
+                                    <Input
+                                        type="number"
+                                        min={1}
+                                        value={k.weight ?? 1}
+                                        onChange={(e) => handleUpdateKey(idx, { weight: Number(e.target.value) || 1 })}
+                                        placeholder={t('weight')}
+                                        className="rounded-xl w-20"
+                                        title={t('weight')}
+                                    />
+                                    <Input
+                                        type="number"
+                                        min={0}
+                                        value={k.rate_limit_cooldown_sec === '' || k.rate_limit_cooldown_sec === undefined ? '' : k.rate_limit_cooldown_sec}
+                                        onChange={(e) => {
+                                            const v = e.target.value;
+                                            handleUpdateKey(idx, { rate_limit_cooldown_sec: v === '' ? '' : Number(v) });
+                                        }}
+                                        placeholder={t('keyCooldown')}
+                                        className="rounded-xl w-24"
+                                        title={t('keyCooldown')}
+                                    />
+                                    <Switch
+                                        checked={k.enabled}
+                                        onCheckedChange={(checked) => handleUpdateKey(idx, { enabled: checked })}
+                                    />
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleRemoveKey(idx)}
+                                        disabled={(formData.keys ?? []).length <= 1}
+                                        className="h-8 w-8 p-0 rounded-xl text-muted-foreground hover:text-destructive hover:bg-transparent disabled:opacity-40"
+                                        title="Remove"
+                                    >
+                                        <X className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </>
+            )}
 
             <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -367,7 +452,7 @@ export function ChannelForm({
                         variant="ghost"
                         size="sm"
                         onClick={handleRefreshModels}
-                        disabled={!formData.base_urls?.[0]?.url || !effectiveKey || fetchModel.isPending}
+                        disabled={!formData.base_urls?.[0]?.url || (!formData.allow_empty_key && !effectiveKey) || fetchModel.isPending}
                         className="h-6 px-2 text-xs text-muted-foreground/50 hover:text-muted-foreground hover:bg-transparent"
                     >
                         <RefreshCw className={`h-3 w-3 mr-1 ${fetchModel.isPending ? 'animate-spin' : ''}`} />

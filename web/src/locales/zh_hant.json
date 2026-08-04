@@ -163,6 +163,11 @@
             "label": "統計保存週期（分鐘）",
             "placeholder": "請輸入週期（分鐘）"
         },
+        "channelKeyRateLimitCooldown": {
+            "label": "Key 429 預設冷卻（秒）",
+            "placeholder": "預設 300",
+            "hint": "渠道/Key 未單獨設定時使用；Key > 渠道 > 全域"
+        },
         "corsAllowOrigins": {
             "label": "CORS 跨網域白名單",
             "hint": "為空禁止跨網域，* 允許所有",
@@ -541,7 +546,19 @@
             "autoGroupRegex": "正規比對",
             "matchRegex": "匹配正規",
             "matchRegexPlaceholder": "可選：用於匹配請求模型名稱的正規表示式",
-            "remark": "備註"
+            "remark": "備註",
+            "allowEmptyKey": "無需 API Key",
+            "allowEmptyKeyHint": "開啟後不發送密鑰，適用於本地/內網無需鑑權的上游",
+            "keyMode": "Key 選擇策略",
+            "keyModeLeastCost": "最少費用",
+            "keyModeRoundRobin": "輪詢",
+            "keyModeRandom": "隨機",
+            "keyModeFailover": "故障轉移",
+            "keyModeWeighted": "加權",
+            "rateLimitCooldown": "429 冷卻（秒）",
+            "rateLimitCooldownPlaceholder": "空=使用全域預設",
+            "weight": "權重",
+            "keyCooldown": "Key 冷卻"
         }
     }
 }

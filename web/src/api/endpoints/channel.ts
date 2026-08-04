@@ -35,6 +35,14 @@ export type CustomHeader = {
     header_value: string;
 };
 
+export enum KeyMode {
+    RoundRobin = 1,
+    Random = 2,
+    Failover = 3,
+    Weighted = 4,
+    LeastCost = 5,
+}
+
 export type ChannelKey = {
     id: number;
     channel_id: number;
@@ -44,6 +52,8 @@ export type ChannelKey = {
     last_use_time_stamp: number;
     total_cost: number;
     remark: string;
+    weight: number;
+    rate_limit_cooldown_sec?: number | null;
 };
 
 /**
@@ -65,6 +75,9 @@ export type Channel = {
     param_override?: string | null;
     channel_proxy?: string | null;
     match_regex?: string | null;
+    key_mode: KeyMode;
+    rate_limit_cooldown_sec?: number | null;
+    allow_empty_key: boolean;
     stats: StatsChannel;
 };
 
@@ -83,7 +96,7 @@ export type CreateChannelRequest = {
     type: ChannelType;
     enabled?: boolean;
     base_urls: BaseUrl[];
-    keys: Array<Pick<ChannelKey, 'enabled' | 'channel_key' | 'remark'>>;
+    keys: Array<Pick<ChannelKey, 'enabled' | 'channel_key' | 'remark' | 'weight'> & { rate_limit_cooldown_sec?: number | null }>;
     model: string;
     custom_model?: string;
     proxy?: boolean;
@@ -93,6 +106,9 @@ export type CreateChannelRequest = {
     channel_proxy?: string | null;
     param_override?: string | null;
     match_regex?: string | null;
+    key_mode?: KeyMode;
+    rate_limit_cooldown_sec?: number | null;
+    allow_empty_key?: boolean;
 };
 
 /**
@@ -113,9 +129,19 @@ export type UpdateChannelRequest = {
     channel_proxy?: string | null;
     param_override?: string | null;
     match_regex?: string | null;
+    key_mode?: KeyMode;
+    rate_limit_cooldown_sec?: number | null;
+    allow_empty_key?: boolean;
     // keys diff
-    keys_to_add?: Array<Pick<ChannelKey, 'enabled' | 'channel_key' | 'remark'>>;
-    keys_to_update?: Array<{ id: number; enabled?: boolean; channel_key?: string; remark?: string }>;
+    keys_to_add?: Array<Pick<ChannelKey, 'enabled' | 'channel_key' | 'remark' | 'weight'> & { rate_limit_cooldown_sec?: number | null }>;
+    keys_to_update?: Array<{
+        id: number;
+        enabled?: boolean;
+        channel_key?: string;
+        remark?: string;
+        weight?: number;
+        rate_limit_cooldown_sec?: number | null;
+    }>;
     keys_to_delete?: number[];
 };
 
@@ -151,7 +177,12 @@ export function useChannelList() {
                 ...item,
                 base_urls: item.base_urls ?? [],
                 custom_header: item.custom_header ?? [],
-                keys: item.keys ?? [],
+                keys: (item.keys ?? []).map((k) => ({
+                    ...k,
+                    weight: k.weight || 1,
+                })),
+                key_mode: item.key_mode || KeyMode.LeastCost,
+                allow_empty_key: item.allow_empty_key ?? false,
             }) satisfies Channel,
             formatted: {
                 input_token: formatCount(item.stats.input_token),
