@@ -1,4 +1,10 @@
-import { AutoGroupType, ChannelType, KeyMode, type Channel, useFetchModel } from '@/api/endpoints/channel';
+import {
+    AutoGroupType,
+    ChannelType,
+    KeyMode,
+    type Channel,
+    useFetchModel,
+} from '@/api/endpoints/channel';
 import {
     Select,
     SelectContent,
@@ -14,38 +20,32 @@ import { toast } from '@/components/common/Toast';
 import { useTranslations } from 'use-intl';
 import { useEffect, useRef, useState } from 'react';
 import { RefreshCw, X, Plus } from 'lucide-react';
+import {
+    Accordion,
+    AccordionContent,
+    AccordionItem,
+    AccordionTrigger,
+} from '@/components/ui/accordion';
+import {
+    defaultKeyItem,
+    normalizeWeight,
+    type ChannelFormData,
+    type ChannelKeyFormItem,
+} from './form-utils';
 
-export interface ChannelKeyFormItem {
-    id?: number;
-    enabled: boolean;
-    channel_key: string;
-    status_code?: number;
-    last_use_time_stamp?: number;
-    total_cost?: number;
-    remark?: string;
-    weight?: number;
-    rate_limit_cooldown_sec?: number | '';
-}
-
-export interface ChannelFormData {
-    name: string;
-    type: ChannelType;
-    base_urls: Channel['base_urls'];
-    custom_header: Channel['custom_header'];
-    channel_proxy: string;
-    param_override: string;
-    keys: ChannelKeyFormItem[];
-    model: string;
-    custom_model: string;
-    enabled: boolean;
-    proxy: boolean;
-    auto_sync: boolean;
-    auto_group: AutoGroupType;
-    match_regex: string;
-    key_mode: KeyMode;
-    rate_limit_cooldown_sec: number | '';
-    allow_empty_key: boolean;
-}
+export type { ChannelFormData, ChannelKeyFormItem } from './form-utils';
+export {
+    channelToFormData,
+    cooldownPatch,
+    defaultKeyItem,
+    emptyChannelForm,
+    keyFormToAddPayload,
+    keyToFormItem,
+    normalizeBaseUrls,
+    normalizeCooldown,
+    normalizeHeaders,
+    normalizeWeight,
+} from './form-utils';
 
 export interface ChannelFormProps {
     formData: ChannelFormData;
@@ -58,13 +58,6 @@ export interface ChannelFormProps {
     cancelText?: string;
     idPrefix?: string;
 }
-
-import {
-    Accordion,
-    AccordionContent,
-    AccordionItem,
-    AccordionTrigger,
-} from "@/components/ui/accordion";
 
 export function ChannelForm({
     formData,
@@ -87,7 +80,7 @@ export function ChannelForm({
             return;
         }
         if (!formData.allow_empty_key && (!formData.keys || formData.keys.length === 0)) {
-            onFormDataChange({ ...formData, keys: [{ enabled: true, channel_key: '', weight: 1 }] });
+            onFormDataChange({ ...formData, keys: [defaultKeyItem()] });
             return;
         }
         if (!formData.custom_header || formData.custom_header.length === 0) {
@@ -175,7 +168,7 @@ export function ChannelForm({
     const handleAddKey = () => {
         onFormDataChange({
             ...formData,
-            keys: [...formData.keys, { enabled: true, channel_key: '', weight: 1, rate_limit_cooldown_sec: '' }],
+            keys: [...formData.keys, defaultKeyItem()],
         });
     };
 
@@ -404,8 +397,8 @@ export function ChannelForm({
                                     <Input
                                         type="number"
                                         min={1}
-                                        value={k.weight ?? 1}
-                                        onChange={(e) => handleUpdateKey(idx, { weight: Number(e.target.value) || 1 })}
+                                        value={normalizeWeight(k.weight)}
+                                        onChange={(e) => handleUpdateKey(idx, { weight: normalizeWeight(Number(e.target.value)) })}
                                         placeholder={t('weight')}
                                         className="rounded-xl w-20"
                                         title={t('weight')}

@@ -22,7 +22,16 @@ import { Tabs, TabsContents, TabsContent } from '@/components/animate-ui/primiti
 import { type StatsMetricsFormatted } from '@/api/endpoints/stats';
 import { useTranslations } from 'use-intl';
 import { Button } from '@/components/ui/button';
-import { ChannelForm, type ChannelFormData } from './Form';
+import {
+    ChannelForm,
+    channelToFormData,
+    cooldownPatch,
+    keyFormToAddPayload,
+    normalizeBaseUrls,
+    normalizeHeaders,
+    normalizeWeight,
+    type ChannelFormData,
+} from './Form';
 import { formatMoney } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -33,37 +42,7 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
     const deleteChannel = useDeleteChannel();
     const [isEditing, setIsEditing] = useState(false);
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
-    const [formData, setFormData] = useState<ChannelFormData>({
-        name: channel.name,
-        type: channel.type,
-        enabled: channel.enabled,
-        base_urls: channel.base_urls?.length ? channel.base_urls : [{ url: '', delay: 0 }],
-        custom_header: channel.custom_header ?? [],
-        channel_proxy: channel.channel_proxy ?? '',
-        param_override: channel.param_override ?? '',
-        keys: channel.keys.length > 0
-            ? channel.keys.map((k) => ({
-                id: k.id,
-                enabled: k.enabled,
-                channel_key: k.channel_key,
-                status_code: k.status_code,
-                last_use_time_stamp: k.last_use_time_stamp,
-                total_cost: k.total_cost,
-                remark: k.remark,
-                weight: k.weight ?? 1,
-                rate_limit_cooldown_sec: k.rate_limit_cooldown_sec ?? '',
-            }))
-            : [{ enabled: true, channel_key: '', remark: '', weight: 1, rate_limit_cooldown_sec: '' }],
-        model: channel.model,
-        custom_model: channel.custom_model,
-        proxy: channel.proxy,
-        auto_sync: channel.auto_sync,
-        auto_group: channel.auto_group,
-        match_regex: channel.match_regex ?? '',
-        key_mode: channel.key_mode || KeyMode.LeastCost,
-        rate_limit_cooldown_sec: channel.rate_limit_cooldown_sec ?? '',
-        allow_empty_key: channel.allow_empty_key ?? false,
-    });
+    const [formData, setFormData] = useState<ChannelFormData>(() => channelToFormData(channel));
     const t = useTranslations('channel.detail');
 
     const currentView = isEditing ? 'editing' : 'viewing';
@@ -82,10 +61,7 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
         if (formData.type !== channel.type) req.type = formData.type;
         if (formData.enabled !== channel.enabled) req.enabled = formData.enabled;
         if (!baseUrlsEqual(formData.base_urls, channel.base_urls)) {
-            req.base_urls = (formData.base_urls ?? []).filter((u) => u.url.trim()).map((u) => ({
-                url: u.url.trim(),
-                delay: Number(u.delay || 0),
-            }));
+            req.base_urls = normalizeBaseUrls(formData.base_urls);
         }
         if (formData.model !== channel.model) req.model = formData.model;
         if (formData.custom_model !== channel.custom_model) req.custom_model = formData.custom_model;
@@ -94,9 +70,7 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
         if (formData.auto_group !== channel.auto_group) req.auto_group = formData.auto_group;
 
         if (!headersEqual(formData.custom_header, channel.custom_header)) {
-            req.custom_header = (formData.custom_header ?? [])
-                .map((h) => ({ header_key: h.header_key.trim(), header_value: h.header_value }))
-                .filter((h) => h.header_key && h.header_value !== '');
+            req.custom_header = normalizeHeaders(formData.custom_header);
         }
 
         const nextChannelProxy = formData.channel_proxy.trim();
@@ -126,15 +100,9 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
         if ((formData.allow_empty_key ?? false) !== (channel.allow_empty_key ?? false)) {
             req.allow_empty_key = formData.allow_empty_key;
         }
-        const nextCooldown = formData.rate_limit_cooldown_sec === '' ? null : Number(formData.rate_limit_cooldown_sec);
-        const curCooldown = channel.rate_limit_cooldown_sec ?? null;
-        if (nextCooldown !== curCooldown) {
-            if (nextCooldown === null) {
-                req.clear_rate_limit_cooldown = true;
-            } else {
-                req.rate_limit_cooldown_sec = nextCooldown;
-            }
-        }
+        const channelCd = cooldownPatch(formData.rate_limit_cooldown_sec, channel.rate_limit_cooldown_sec);
+        if (channelCd?.clear) req.clear_rate_limit_cooldown = true;
+        else if (channelCd?.value !== undefined) req.rate_limit_cooldown_sec = channelCd.value;
 
         const originalKeys = channel.keys;
         const originalByID = new Map(originalKeys.map((k) => [k.id, k]));
@@ -145,16 +113,7 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
 
         const keys_to_add = nextKeys
             .filter((k) => !k.id && k.channel_key.trim())
-            .map((k) => ({
-                enabled: k.enabled,
-                channel_key: k.channel_key,
-                remark: k.remark ?? '',
-                weight: k.weight && k.weight > 0 ? k.weight : 1,
-                rate_limit_cooldown_sec:
-                    k.rate_limit_cooldown_sec === '' || k.rate_limit_cooldown_sec === undefined
-                        ? null
-                        : Number(k.rate_limit_cooldown_sec),
-            }));
+            .map(keyFormToAddPayload);
 
         type KeyUpdate = NonNullable<UpdateChannelRequest['keys_to_update']>[number];
         const keys_to_update: KeyUpdate[] = nextKeys
@@ -165,20 +124,11 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                 if (k.enabled !== orig.enabled) u.enabled = k.enabled;
                 if (k.channel_key !== orig.channel_key) u.channel_key = k.channel_key;
                 if ((k.remark ?? '') !== orig.remark) u.remark = k.remark ?? '';
-                const nextW = k.weight && k.weight > 0 ? k.weight : 1;
-                if (nextW !== (orig.weight || 1)) u.weight = nextW;
-                const nextKeyCd =
-                    k.rate_limit_cooldown_sec === '' || k.rate_limit_cooldown_sec === undefined
-                        ? null
-                        : Number(k.rate_limit_cooldown_sec);
-                const curKeyCd = orig.rate_limit_cooldown_sec ?? null;
-                if (nextKeyCd !== curKeyCd) {
-                    if (nextKeyCd === null) {
-                        u.clear_rate_limit_cooldown = true;
-                    } else {
-                        u.rate_limit_cooldown_sec = nextKeyCd;
-                    }
-                }
+                const nextW = normalizeWeight(k.weight);
+                if (nextW !== normalizeWeight(orig.weight)) u.weight = nextW;
+                const keyCd = cooldownPatch(k.rate_limit_cooldown_sec, orig.rate_limit_cooldown_sec);
+                if (keyCd?.clear) u.clear_rate_limit_cooldown = true;
+                else if (keyCd?.value !== undefined) u.rate_limit_cooldown_sec = keyCd.value;
                 return Object.keys(u).length > 1 ? u : null;
             })
             .filter((u): u is KeyUpdate => u !== null);

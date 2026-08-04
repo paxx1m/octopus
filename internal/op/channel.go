@@ -165,29 +165,7 @@ func ChannelBaseUrlUpdate(channelID int, baseUrl []model.BaseUrl) error {
 
 // ChannelKeySaveDB 将运行时更新过的 ChannelKey 缓存写入数据库。
 func ChannelKeySaveDB(ctx context.Context) error {
-	keyIDs := snapshotDirtyIDs(&channelKeyCacheNeedUpdate, &channelKeyCacheNeedUpdateLock)
-	if len(keyIDs) == 0 {
-		return nil
-	}
-
-	dbConn := db.GetDB().WithContext(ctx)
-	err := dbConn.Transaction(func(tx *gorm.DB) error {
-		for _, id := range keyIDs {
-			k, ok := channelKeyCache.Get(id)
-			if !ok {
-				continue
-			}
-			if err := tx.Save(&k).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		remergeDirtyIDs(&channelKeyCacheNeedUpdate, &channelKeyCacheNeedUpdateLock, keyIDs)
-		return err
-	}
-	return nil
+	return channelKeyPersist(ctx, snapshotDirtyIDs(&channelKeyCacheNeedUpdate, &channelKeyCacheNeedUpdateLock))
 }
 
 // channelKeySaveDBByChannel flushes dirty keys belonging to one channel.
@@ -201,12 +179,14 @@ func channelKeySaveDBByChannel(ctx context.Context, channelID int) error {
 		}
 	}
 	channelKeyCacheNeedUpdateLock.Unlock()
+	return channelKeyPersist(ctx, keyIDs)
+}
+
+func channelKeyPersist(ctx context.Context, keyIDs []int) error {
 	if len(keyIDs) == 0 {
 		return nil
 	}
-
-	dbConn := db.GetDB().WithContext(ctx)
-	err := dbConn.Transaction(func(tx *gorm.DB) error {
+	err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, id := range keyIDs {
 			k, ok := channelKeyCache.Get(id)
 			if !ok {
