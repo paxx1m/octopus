@@ -27,17 +27,22 @@ func GenerateID() int64 {
 	defer sfMutex.Unlock()
 
 	now := time.Now().UnixMilli()
-	if now == sfLastTime {
+	// Clock rollback or same millisecond: keep monotonic on last time + sequence.
+	if now <= sfLastTime {
 		sfSeq = (sfSeq + 1) & 0xFFF
 		if sfSeq == 0 {
+			// Sequence exhausted; wait until clock advances past last time.
 			for now <= sfLastTime {
 				now = time.Now().UnixMilli()
 			}
+			sfLastTime = now
+		} else {
+			now = sfLastTime
 		}
 	} else {
 		sfSeq = 0
+		sfLastTime = now
 	}
-	sfLastTime = now
 
 	// 41 bits time | 10 bits worker | 12 bits sequence
 	return (now << 22) | (sfWorker << 12) | sfSeq

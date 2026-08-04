@@ -129,7 +129,11 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
         const nextCooldown = formData.rate_limit_cooldown_sec === '' ? null : Number(formData.rate_limit_cooldown_sec);
         const curCooldown = channel.rate_limit_cooldown_sec ?? null;
         if (nextCooldown !== curCooldown) {
-            req.rate_limit_cooldown_sec = nextCooldown;
+            if (nextCooldown === null) {
+                req.clear_rate_limit_cooldown = true;
+            } else {
+                req.rate_limit_cooldown_sec = nextCooldown;
+            }
         }
 
         const originalKeys = channel.keys;
@@ -168,7 +172,13 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                         ? null
                         : Number(k.rate_limit_cooldown_sec);
                 const curKeyCd = orig.rate_limit_cooldown_sec ?? null;
-                if (nextKeyCd !== curKeyCd) u.rate_limit_cooldown_sec = nextKeyCd;
+                if (nextKeyCd !== curKeyCd) {
+                    if (nextKeyCd === null) {
+                        u.clear_rate_limit_cooldown = true;
+                    } else {
+                        u.rate_limit_cooldown_sec = nextKeyCd;
+                    }
+                }
                 return Object.keys(u).length > 1 ? u : null;
             })
             .filter((u): u is KeyUpdate => u !== null);

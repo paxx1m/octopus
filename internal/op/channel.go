@@ -138,42 +138,6 @@ func ChannelKeyApplyUpdate(keyID, channelID, statusCode int, lastUseTimeStamp in
 	return nil
 }
 
-// ChannelKeyUpdate 仅更新 ChannelKey 的内存缓存（不落库），并标记为需要在 SaveCache 时写入数据库。
-// 调用方若持有过期的 TotalCost 快照，请改用 ChannelKeyApplyUpdate 传 costDelta。
-func ChannelKeyUpdate(key model.ChannelKey) error {
-	if key.ID == 0 || key.ChannelID == 0 {
-		return fmt.Errorf("invalid channel key")
-	}
-
-	mu := channelLock(key.ChannelID)
-	mu.Lock()
-	defer mu.Unlock()
-
-	ch, ok := channelCache.Get(key.ChannelID)
-	if !ok {
-		return fmt.Errorf("channel not found")
-	}
-	if len(ch.Keys) > 0 {
-		keys := make([]model.ChannelKey, len(ch.Keys))
-		copy(keys, ch.Keys)
-		for i := range keys {
-			if keys[i].ID == key.ID {
-				// Preserve TotalCost from cache if caller passed a stale absolute value
-				// by only overwriting status fields when costs match; prefer ApplyUpdate.
-				keys[i] = key
-				break
-			}
-		}
-		ch.Keys = keys
-	}
-	channelCache.Set(key.ChannelID, ch)
-	channelKeyCache.Set(key.ID, key)
-	channelKeyCacheNeedUpdateLock.Lock()
-	channelKeyCacheNeedUpdate[key.ID] = struct{}{}
-	channelKeyCacheNeedUpdateLock.Unlock()
-	return nil
-}
-
 func ChannelBaseUrlUpdate(channelID int, baseUrl []model.BaseUrl) error {
 	mu := channelLock(channelID)
 	mu.Lock()
@@ -201,14 +165,7 @@ func ChannelBaseUrlUpdate(channelID int, baseUrl []model.BaseUrl) error {
 
 // ChannelKeySaveDB 将运行时更新过的 ChannelKey 缓存写入数据库。
 func ChannelKeySaveDB(ctx context.Context) error {
-	channelKeyCacheNeedUpdateLock.Lock()
-	keyIDs := make([]int, 0, len(channelKeyCacheNeedUpdate))
-	for id := range channelKeyCacheNeedUpdate {
-		keyIDs = append(keyIDs, id)
-	}
-	channelKeyCacheNeedUpdate = make(map[int]struct{})
-	channelKeyCacheNeedUpdateLock.Unlock()
-
+	keyIDs := snapshotDirtyIDs(&channelKeyCacheNeedUpdate, &channelKeyCacheNeedUpdateLock)
 	if len(keyIDs) == 0 {
 		return nil
 	}
@@ -227,11 +184,42 @@ func ChannelKeySaveDB(ctx context.Context) error {
 		return nil
 	})
 	if err != nil {
-		channelKeyCacheNeedUpdateLock.Lock()
-		for _, id := range keyIDs {
-			channelKeyCacheNeedUpdate[id] = struct{}{}
+		remergeDirtyIDs(&channelKeyCacheNeedUpdate, &channelKeyCacheNeedUpdateLock, keyIDs)
+		return err
+	}
+	return nil
+}
+
+// channelKeySaveDBByChannel flushes dirty keys belonging to one channel.
+func channelKeySaveDBByChannel(ctx context.Context, channelID int) error {
+	channelKeyCacheNeedUpdateLock.Lock()
+	keyIDs := make([]int, 0)
+	for id := range channelKeyCacheNeedUpdate {
+		if k, ok := channelKeyCache.Get(id); ok && k.ChannelID == channelID {
+			keyIDs = append(keyIDs, id)
+			delete(channelKeyCacheNeedUpdate, id)
 		}
-		channelKeyCacheNeedUpdateLock.Unlock()
+	}
+	channelKeyCacheNeedUpdateLock.Unlock()
+	if len(keyIDs) == 0 {
+		return nil
+	}
+
+	dbConn := db.GetDB().WithContext(ctx)
+	err := dbConn.Transaction(func(tx *gorm.DB) error {
+		for _, id := range keyIDs {
+			k, ok := channelKeyCache.Get(id)
+			if !ok {
+				continue
+			}
+			if err := tx.Save(&k).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		remergeDirtyIDs(&channelKeyCacheNeedUpdate, &channelKeyCacheNeedUpdateLock, keyIDs)
 		return err
 	}
 	return nil
@@ -312,10 +300,6 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 		selectFields = append(selectFields, "key_mode")
 		updates.KeyMode = *req.KeyMode
 	}
-	if req.RateLimitCooldownSec != nil {
-		selectFields = append(selectFields, "rate_limit_cooldown_sec")
-		updates.RateLimitCooldownSec = req.RateLimitCooldownSec
-	}
 	if req.AllowEmptyKey != nil {
 		selectFields = append(selectFields, "allow_empty_key")
 		updates.AllowEmptyKey = *req.AllowEmptyKey
@@ -326,6 +310,21 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 		if err := tx.Model(&model.Channel{}).Where("id = ?", req.ID).Select(selectFields).Updates(&updates).Error; err != nil {
 			tx.Rollback()
 			return nil, fmt.Errorf("failed to update channel: %w", err)
+		}
+	}
+
+	// rate_limit_cooldown_sec: use ClearRateLimitCooldown to distinguish "unset" vs "clear to inherit"
+	if req.ClearRateLimitCooldown {
+		if err := tx.Model(&model.Channel{}).Where("id = ?", req.ID).
+			Update("rate_limit_cooldown_sec", nil).Error; err != nil {
+			tx.Rollback()
+			return nil, fmt.Errorf("failed to clear channel rate limit cooldown: %w", err)
+		}
+	} else if req.RateLimitCooldownSec != nil {
+		if err := tx.Model(&model.Channel{}).Where("id = ?", req.ID).
+			Update("rate_limit_cooldown_sec", *req.RateLimitCooldownSec).Error; err != nil {
+			tx.Rollback()
+			return nil, fmt.Errorf("failed to update channel rate limit cooldown: %w", err)
 		}
 	}
 
@@ -351,9 +350,15 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 				updates["remark"] = *ku.Remark
 			}
 			if ku.Weight != nil {
-				updates["weight"] = *ku.Weight
+				w := *ku.Weight
+				if w <= 0 {
+					w = 1
+				}
+				updates["weight"] = w
 			}
-			if ku.RateLimitCooldownSec != nil {
+			if ku.ClearRateLimitCooldown {
+				updates["rate_limit_cooldown_sec"] = nil
+			} else if ku.RateLimitCooldownSec != nil {
 				updates["rate_limit_cooldown_sec"] = *ku.RateLimitCooldownSec
 			}
 			if len(updates) == 0 {
@@ -372,16 +377,12 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 	if len(req.KeysToAdd) > 0 {
 		newKeys := make([]model.ChannelKey, 0, len(req.KeysToAdd))
 		for _, ka := range req.KeysToAdd {
-			weight := ka.Weight
-			if weight <= 0 {
-				weight = 1
-			}
 			newKeys = append(newKeys, model.ChannelKey{
 				ChannelID:            req.ID,
 				Enabled:              ka.Enabled,
 				ChannelKey:           ka.ChannelKey,
 				Remark:               ka.Remark,
-				Weight:               weight,
+				Weight:               model.KeyWeight(ka.Weight),
 				RateLimitCooldownSec: ka.RateLimitCooldownSec,
 			})
 		}
@@ -546,19 +547,62 @@ func channelRefreshCache(ctx context.Context) error {
 }
 
 func channelRefreshCacheByID(id int, ctx context.Context) error {
+	// Persist runtime key costs/status before reload so they are not wiped.
+	if err := channelKeySaveDBByChannel(ctx, id); err != nil {
+		log.Warnf("failed to flush channel %d keys before refresh: %v", id, err)
+	}
+
+	mu := channelLock(id)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Capture runtime fields that may still be dirty or just flushed but
+	// also re-applied concurrently; merge into DB snapshot.
+	runtimeByID := map[int]model.ChannelKey{}
 	if old, ok := channelCache.Get(id); ok {
 		for _, k := range old.Keys {
 			if k.ID != 0 {
-				channelKeyCache.Del(k.ID)
+				runtimeByID[k.ID] = k
 			}
 		}
 	}
+
 	var channel model.Channel
 	if err := db.GetDB().WithContext(ctx).
 		Preload("Keys").
 		Preload("Stats").
 		First(&channel, id).Error; err != nil {
 		return err
+	}
+
+	for i := range channel.Keys {
+		k := &channel.Keys[i]
+		if rt, ok := runtimeByID[k.ID]; ok {
+			// Keep live accounting / rate-limit state over DB snapshot when dirty
+			// was just flushed OR concurrent ApplyUpdate raced the flush.
+			channelKeyCacheNeedUpdateLock.Lock()
+			_, stillDirty := channelKeyCacheNeedUpdate[k.ID]
+			channelKeyCacheNeedUpdateLock.Unlock()
+			if stillDirty {
+				k.TotalCost = rt.TotalCost
+				k.StatusCode = rt.StatusCode
+				k.LastUseTimeStamp = rt.LastUseTimeStamp
+			} else if rt.TotalCost > k.TotalCost || rt.LastUseTimeStamp > k.LastUseTimeStamp {
+				// Prefer higher cost / newer use time if flush and concurrent update raced.
+				if rt.TotalCost > k.TotalCost {
+					k.TotalCost = rt.TotalCost
+				}
+				if rt.LastUseTimeStamp >= k.LastUseTimeStamp {
+					k.LastUseTimeStamp = rt.LastUseTimeStamp
+					k.StatusCode = rt.StatusCode
+				}
+			}
+		}
+	}
+
+	// Drop old key cache entries for this channel
+	for id := range runtimeByID {
+		channelKeyCache.Del(id)
 	}
 	channelCache.Set(channel.ID, channel)
 	for _, k := range channel.Keys {

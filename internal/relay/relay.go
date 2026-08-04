@@ -138,25 +138,32 @@ func (r *relayRun) tryChannel() (ok, written bool, err error) {
 		return r.tryOneKey(channel, dbmodel.ChannelKey{}, item.ModelName)
 	}
 
-	// Prefer sticky key once at channel entry; if unavailable, clear and use manager.
+	// Sticky: only when this candidate is the sticky channel. Prefer sticky key;
+	// if that key is cooling down / failed, failover other keys in-channel without
+	// clearing channel affinity. Clear sticky only when the key is gone/disabled.
 	exclude := map[int]struct{}{}
-	if sticky := r.stickyKeyID; sticky > 0 {
-		found := false
-		for _, k := range channel.Keys {
-			if k.ID == sticky && keymanager.IsAvailable(channel, k, time.Now().Unix()) {
-				found = true
-				success, written, err := r.tryOneKey(channel, k, item.ModelName)
-				if success || written {
-					return success, written, err
-				}
-				exclude[k.ID] = struct{}{}
-				// continue with other keys in this channel
+	if r.iter.IsSticky() && r.stickyKeyID > 0 {
+		var stickyKey *dbmodel.ChannelKey
+		for i := range channel.Keys {
+			if channel.Keys[i].ID == r.stickyKeyID {
+				stickyKey = &channel.Keys[i]
 				break
 			}
 		}
-		if !found {
+		if stickyKey == nil || !stickyKey.Enabled || stickyKey.ChannelKey == "" {
+			// Key deleted or permanently disabled — drop session affinity.
 			balancer.ClearSticky(r.metrics.APIKeyID, r.metrics.RequestModel)
 			r.stickyKeyID = 0
+		} else if keymanager.IsAvailable(channel, *stickyKey, time.Now().Unix()) {
+			success, written, err := r.tryOneKey(channel, *stickyKey, item.ModelName)
+			if success || written {
+				return success, written, err
+			}
+			// Failed attempt: try other keys in this channel, keep sticky channel.
+			exclude[stickyKey.ID] = struct{}{}
+		} else {
+			// Temporary unavailability (e.g. 429 cooldown): skip sticky key, keep channel sticky.
+			exclude[stickyKey.ID] = struct{}{}
 		}
 	}
 
@@ -199,12 +206,16 @@ func (r *relayRun) tryOneKey(channel *dbmodel.Channel, usedKey dbmodel.ChannelKe
 	if skipped {
 		return false, false, nil
 	}
+	// Any exit before RecordSuccess/Failure on a HalfOpen probe must abort the probe.
+	probeDone := false
+	defer func() {
+		if isProbe && !probeDone {
+			balancer.RecordProbeAborted(channel.ID, usedKey.ID, modelName)
+		}
+	}()
 
 	outAdapter, err := newOutbound(channel.Type, r.internalRequest, channel.GetBaseUrl(), usedKey.ChannelKey)
 	if err != nil {
-		if isProbe {
-			balancer.RecordProbeAborted(channel.ID, usedKey.ID, modelName)
-		}
 		r.iter.Skip(channel.ID, usedKey.ID, channel.Name, err.Error())
 		return false, false, nil
 	}
@@ -222,7 +233,10 @@ func (r *relayRun) tryOneKey(channel *dbmodel.Channel, usedKey dbmodel.ChannelKe
 		channel:    channel,
 		usedKey:    usedKey,
 	}
-	return ra.run()
+	ok, written, err = ra.run()
+	// run() always calls RecordSuccess or RecordFailure for real forwards.
+	probeDone = true
+	return ok, written, err
 }
 
 // run 统一管理一次通道+Key 尝试的完整生命周期。

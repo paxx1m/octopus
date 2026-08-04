@@ -89,7 +89,9 @@ type ChannelUpdateRequest struct {
 	MatchRegex           *string         `json:"match_regex,omitempty"`
 	KeyMode              *KeyMode        `json:"key_mode,omitempty"`
 	RateLimitCooldownSec *int            `json:"rate_limit_cooldown_sec,omitempty"`
-	AllowEmptyKey        *bool           `json:"allow_empty_key,omitempty"`
+	// ClearRateLimitCooldown when true sets rate_limit_cooldown_sec to NULL (inherit global).
+	ClearRateLimitCooldown bool  `json:"clear_rate_limit_cooldown,omitempty"`
+	AllowEmptyKey          *bool `json:"allow_empty_key,omitempty"`
 
 	KeysToAdd    []ChannelKeyAddRequest    `json:"keys_to_add,omitempty"`
 	KeysToUpdate []ChannelKeyUpdateRequest `json:"keys_to_update,omitempty"`
@@ -105,12 +107,21 @@ type ChannelKeyAddRequest struct {
 }
 
 type ChannelKeyUpdateRequest struct {
-	ID                   int     `json:"id" binding:"required"`
-	Enabled              *bool   `json:"enabled,omitempty"`
-	ChannelKey           *string `json:"channel_key,omitempty"`
-	Remark               *string `json:"remark,omitempty"`
-	Weight               *int    `json:"weight,omitempty"`
-	RateLimitCooldownSec *int    `json:"rate_limit_cooldown_sec,omitempty"`
+	ID                     int     `json:"id" binding:"required"`
+	Enabled                *bool   `json:"enabled,omitempty"`
+	ChannelKey             *string `json:"channel_key,omitempty"`
+	Remark                 *string `json:"remark,omitempty"`
+	Weight                 *int    `json:"weight,omitempty"`
+	RateLimitCooldownSec   *int    `json:"rate_limit_cooldown_sec,omitempty"`
+	ClearRateLimitCooldown bool    `json:"clear_rate_limit_cooldown,omitempty"`
+}
+
+// KeyWeight returns effective weight (minimum 1).
+func KeyWeight(w int) int {
+	if w <= 0 {
+		return 1
+	}
+	return w
 }
 
 func (c *Channel) GetBaseUrl() string {

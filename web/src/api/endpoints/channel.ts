@@ -131,6 +131,7 @@ export type UpdateChannelRequest = {
     match_regex?: string | null;
     key_mode?: KeyMode;
     rate_limit_cooldown_sec?: number | null;
+    clear_rate_limit_cooldown?: boolean;
     allow_empty_key?: boolean;
     // keys diff
     keys_to_add?: Array<Pick<ChannelKey, 'enabled' | 'channel_key' | 'remark' | 'weight'> & { rate_limit_cooldown_sec?: number | null }>;
@@ -141,6 +142,7 @@ export type UpdateChannelRequest = {
         remark?: string;
         weight?: number;
         rate_limit_cooldown_sec?: number | null;
+        clear_rate_limit_cooldown?: boolean;
     }>;
     keys_to_delete?: number[];
 };

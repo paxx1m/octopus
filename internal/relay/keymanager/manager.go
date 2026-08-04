@@ -72,14 +72,19 @@ func CountAvailable(ch *model.Channel) int {
 
 // Select picks one key by channel KeyMode from available keys (excluding tried).
 func Select(ch *model.Channel, exclude map[int]struct{}) (model.ChannelKey, bool) {
+	if ch == nil {
+		return model.ChannelKey{}, false
+	}
+	mode := ch.EffectiveKeyMode()
+	if mode == model.KeyModeRoundRobin {
+		return selectRoundRobin(ch, exclude)
+	}
+
 	available := ListAvailable(ch, exclude)
 	if len(available) == 0 {
 		return model.ChannelKey{}, false
 	}
-	mode := ch.EffectiveKeyMode()
 	switch mode {
-	case model.KeyModeRoundRobin:
-		return selectRoundRobin(ch.ID, available), true
 	case model.KeyModeRandom:
 		return available[rand.Intn(len(available))], true
 	case model.KeyModeFailover:
@@ -93,11 +98,39 @@ func Select(ch *model.Channel, exclude map[int]struct{}) (model.ChannelKey, bool
 	}
 }
 
-func selectRoundRobin(channelID int, keys []model.ChannelKey) model.ChannelKey {
-	v, _ := roundRobinCounters.LoadOrStore(channelID, new(uint64))
+// selectRoundRobin walks the full enabled-key list by stable ID order so that
+// temporary unavailability (429) does not skew the rotation modulo.
+func selectRoundRobin(ch *model.Channel, exclude map[int]struct{}) (model.ChannelKey, bool) {
+	candidates := make([]model.ChannelKey, 0, len(ch.Keys))
+	for _, k := range ch.Keys {
+		if !k.Enabled || k.ChannelKey == "" {
+			continue
+		}
+		if exclude != nil {
+			if _, skip := exclude[k.ID]; skip {
+				continue
+			}
+		}
+		candidates = append(candidates, k)
+	}
+	if len(candidates) == 0 {
+		return model.ChannelKey{}, false
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].ID < candidates[j].ID
+	})
+
+	v, _ := roundRobinCounters.LoadOrStore(ch.ID, new(uint64))
 	counter := v.(*uint64)
-	idx := int(atomic.AddUint64(counter, 1)-1) % len(keys)
-	return keys[idx]
+	start := int(atomic.AddUint64(counter, 1)-1) % len(candidates)
+	nowSec := time.Now().Unix()
+	for i := 0; i < len(candidates); i++ {
+		k := candidates[(start+i)%len(candidates)]
+		if IsAvailable(ch, k, nowSec) {
+			return k, true
+		}
+	}
+	return model.ChannelKey{}, false
 }
 
 func selectFailover(keys []model.ChannelKey) model.ChannelKey {
@@ -112,22 +145,14 @@ func selectFailover(keys []model.ChannelKey) model.ChannelKey {
 func selectWeighted(keys []model.ChannelKey) model.ChannelKey {
 	total := 0
 	for _, k := range keys {
-		w := k.Weight
-		if w <= 0 {
-			w = 1
-		}
-		total += w
+		total += model.KeyWeight(k.Weight)
 	}
 	if total <= 0 {
 		return keys[0]
 	}
 	r := rand.Intn(total)
 	for _, k := range keys {
-		w := k.Weight
-		if w <= 0 {
-			w = 1
-		}
-		r -= w
+		r -= model.KeyWeight(k.Weight)
 		if r < 0 {
 			return k
 		}
