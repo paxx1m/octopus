@@ -7,7 +7,7 @@ import {
     MorphingDialogContainer,
     MorphingDialogContent,
 } from '@/components/ui/morphing-dialog';
-import { dialogContentClass } from '@/components/common/DialogShell';
+import { dialogPanelClass } from '@/components/common/DialogShell';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -328,11 +328,9 @@ export function Toolbar() {
 
                     <MorphingDialogContainer>
                         <MorphingDialogContent
-                            className={cn(
-                                dialogContentClass.base,
-                                dialogContentClass.maxH,
-                                'w-fit max-w-full px-4 py-4 sm:px-6',
-                                toolbarItem === 'group' && dialogContentClass.fixedH,
+                            className={dialogPanelClass(
+                                toolbarItem === 'group' ? 'lg' : 'md',
+                                { fixedHeight: toolbarItem === 'group' },
                             )}
                         >
                             <CreateDialogContent activeItem={toolbarItem} />

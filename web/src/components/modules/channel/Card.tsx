@@ -152,7 +152,7 @@ export function Card({ channel, stats, layout = 'grid' }: { channel: Channel; st
             </MorphingDialogTrigger>
 
             <MorphingDialogContainer>
-                <MorphingDialogContent className={dialogPanelClass('md', { className: 'py-2' })}>
+                <MorphingDialogContent className={dialogPanelClass('md', { className: 'py-3' })}>
                     <CardContent channel={channel} stats={stats} />
                 </MorphingDialogContent>
             </MorphingDialogContainer>

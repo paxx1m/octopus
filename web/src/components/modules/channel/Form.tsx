@@ -226,7 +226,7 @@ export function ChannelForm({
     };
 
     return (
-        <form onSubmit={onSubmit} className="space-y-4 px-1">
+        <form onSubmit={onSubmit} className="min-w-0 space-y-4 px-1">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                     <label htmlFor={`${idPrefix}-name`} className="text-sm font-medium text-card-foreground">

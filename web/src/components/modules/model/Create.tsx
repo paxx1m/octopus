@@ -47,7 +47,7 @@ export function CreateDialogContent() {
     };
 
     return (
-        <DialogShell title={t('title')} size="md" scroll="body">
+        <DialogShell title={t('title')} scroll="body">
             <form onSubmit={handleSubmit}>
                 <FieldGroup className="gap-4">
                     <Field>

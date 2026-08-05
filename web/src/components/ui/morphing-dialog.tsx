@@ -267,7 +267,9 @@ function MorphingDialogContent({
       ref={containerRef}
       layoutId={`dialog-${uniqueId}`}
       className={cn(
-        'relative flex min-h-0 max-h-[min(90dvh,calc(100dvh-2rem))] flex-col overflow-hidden',
+        // Defaults only; callers should set width via dialogPanelClass.
+        // box-border so padding is inside the declared width.
+        'relative box-border flex min-h-0 max-h-[min(90dvh,calc(100dvh-2rem))] flex-col overflow-hidden',
         className
       )}
       style={style}

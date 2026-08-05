@@ -12,7 +12,7 @@ export function CreateDialogContent() {
     const t = useTranslations('group');
 
     return (
-        <DialogShell title={t('create.title')} size="lg" scroll="none">
+        <DialogShell title={t('create.title')} scroll="none">
             <GroupEditor
                 submitText={t('create.submit')}
                 submittingText={t('create.submitting')}

@@ -39,7 +39,7 @@ function EditDialogContent({ group, displayMembers, isSubmitting, onSubmit }: Ed
     const { setIsOpen } = useMorphingDialog();
     const t = useTranslations('group');
     return (
-        <DialogShell title={t('detail.actions.edit')} size="lg" scroll="none">
+        <DialogShell title={t('detail.actions.edit')} scroll="none">
             <GroupEditor
                 key={`edit-group-${group.id}`}
                 initial={{

@@ -307,8 +307,8 @@ export function LogCard({ log }: { log: RelayLog }) {
                             )}
                         </MorphingDialogTitle>
 
-                        <MorphingDialogDescription className="min-h-0 flex-1 overflow-y-auto overscroll-contain md:overflow-hidden">
-                            <div className="flex h-full min-h-0 flex-col gap-4">
+                        <MorphingDialogDescription className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain md:overflow-hidden">
+                            <div className="flex h-full min-h-0 min-w-0 flex-col gap-4">
                                 {(hasError || hasMultipleAttempts) && (
                                     <div className={cn(
                                         "flex-initial min-h-0 flex flex-col rounded-2xl border overflow-hidden max-h-[40%]",

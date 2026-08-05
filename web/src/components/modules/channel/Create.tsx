@@ -59,7 +59,7 @@ export function CreateDialogContent() {
     };
 
     return (
-        <DialogShell title={t('dialogTitle')} size="md" scroll="body">
+        <DialogShell title={t('dialogTitle')} scroll="body">
             <ChannelForm
                 formData={formData}
                 onFormDataChange={setFormData}

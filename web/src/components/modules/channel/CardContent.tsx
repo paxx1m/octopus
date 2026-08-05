@@ -160,7 +160,6 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
     return (
         <DialogShell
             title={isEditing ? t('title.edit') : t('title.view')}
-            size="md"
             scroll="body"
         >
                 <Tabs value={currentView}>
