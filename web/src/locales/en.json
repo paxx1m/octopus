@@ -577,7 +577,20 @@
             "rateLimitCooldown": "429 cooldown (sec)",
             "rateLimitCooldownPlaceholder": "Empty = global default",
             "weight": "Weight",
-            "keyCooldown": "Key cooldown"
+            "keyCooldown": "Key cooldown",
+            "bulkImport": "Bulk import",
+            "bulkCancel": "Cancel bulk",
+            "bulkKeysPlaceholder": "One key per line:\nsk-xxx\nsk-yyy|remark|2|60",
+            "bulkKeysHint": "Format: key | remark | weight | cooldown(sec). Empty segments use defaults. Newlines only.",
+            "bulkKeysPreview": "Will import {count} key(s)",
+            "bulkKeysPreviewEmpty": "No valid keys yet",
+            "bulkKeysApply": "Apply",
+            "bulkKeysAppend": "Append keys",
+            "bulkKeysEmpty": "No valid keys in text",
+            "bulkKeysNoNew": "No new keys to add (duplicates skipped)",
+            "bulkKeysApplied": "Added {count} key(s)",
+            "singleKeyHint": "Need many keys? Use Bulk import. Optional: key|remark|weight|cooldown",
+            "keyAdvanced": "More options"
         }
     }
 }

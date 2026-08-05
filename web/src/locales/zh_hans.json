@@ -577,7 +577,20 @@
             "rateLimitCooldown": "429 冷却（秒）",
             "rateLimitCooldownPlaceholder": "空=使用全局默认",
             "weight": "权重",
-            "keyCooldown": "Key 冷却"
+            "keyCooldown": "Key 冷却",
+            "bulkImport": "批量导入",
+            "bulkCancel": "取消批量",
+            "bulkKeysPlaceholder": "每行一个 Key：\nsk-xxx\nsk-yyy|备注|2|60",
+            "bulkKeysHint": "格式：key | 备注 | 权重 | 冷却(秒)。缺省段用默认值。仅按换行分隔。",
+            "bulkKeysPreview": "将导入 {count} 个 Key",
+            "bulkKeysPreviewEmpty": "暂无有效 Key",
+            "bulkKeysApply": "应用",
+            "bulkKeysAppend": "追加 Key",
+            "bulkKeysEmpty": "文本中没有有效 Key",
+            "bulkKeysNoNew": "没有可追加的新 Key（已去重）",
+            "bulkKeysApplied": "已添加 {count} 个 Key",
+            "singleKeyHint": "多个 Key 请用「批量导入」。也可写 key|备注|权重|冷却",
+            "keyAdvanced": "更多选项"
         }
     }
 }

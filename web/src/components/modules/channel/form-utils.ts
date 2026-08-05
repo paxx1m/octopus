@@ -159,3 +159,59 @@ export function cooldownPatch(
     if (nextN === null) return { clear: true };
     return { value: nextN };
 }
+
+/**
+ * Parse one bulk-import line:
+ *   channel_key | remark? | weight? | key_cooldown?
+ * Empty optional segments are ignored (defaults: remark="", weight=1, cooldown=inherit).
+ */
+export function parseKeyLine(line: string): ChannelKeyFormItem | null {
+    const trimmed = line.trim();
+    if (!trimmed) return null;
+
+    const parts = trimmed.split('|').map((p) => p.trim());
+    const channel_key = parts[0] ?? '';
+    if (!channel_key) return null;
+
+    const remark = parts[1] && parts[1].length > 0 ? parts[1] : '';
+
+    let weight = 1;
+    if (parts[2] !== undefined && parts[2] !== '') {
+        const w = Number(parts[2]);
+        if (Number.isFinite(w) && w > 0) weight = Math.max(1, Math.floor(w));
+    }
+
+    let rate_limit_cooldown_sec: number | '' = '';
+    if (parts[3] !== undefined && parts[3] !== '') {
+        const c = Number(parts[3]);
+        if (Number.isFinite(c) && c >= 0) rate_limit_cooldown_sec = c;
+    }
+
+    return defaultKeyItem({
+        channel_key,
+        remark,
+        weight,
+        rate_limit_cooldown_sec,
+    });
+}
+
+/** Split bulk text by newlines only; dedupe by channel_key (first wins). */
+export function parseKeyLines(text: string): ChannelKeyFormItem[] {
+    const seen = new Set<string>();
+    const out: ChannelKeyFormItem[] = [];
+    for (const line of text.split(/\r?\n/)) {
+        const item = parseKeyLine(line);
+        if (!item) continue;
+        if (seen.has(item.channel_key)) continue;
+        seen.add(item.channel_key);
+        out.push(item);
+    }
+    return out;
+}
+
+/** Mask middle of key for compact list display. */
+export function maskChannelKey(key: string): string {
+    const s = key.trim();
+    if (s.length <= 10) return s || '—';
+    return `${s.slice(0, 4)}…${s.slice(-4)}`;
+}
