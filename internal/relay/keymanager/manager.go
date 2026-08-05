@@ -17,7 +17,7 @@ const defaultRateLimitCooldownSec = 300
 
 var roundRobinCounters sync.Map // channelID -> *uint64
 
-// RateLimitCooldownSec resolves 429 cooldown: Key > Channel > Global > 300.
+// RateLimitCooldownSec 解析 429 冷却秒数，优先级：Key > 渠道 > 全局设置 > 300。
 func RateLimitCooldownSec(ch *model.Channel, key *model.ChannelKey) int {
 	if key != nil && key.RateLimitCooldownSec != nil && *key.RateLimitCooldownSec > 0 {
 		return *key.RateLimitCooldownSec
@@ -31,7 +31,13 @@ func RateLimitCooldownSec(ch *model.Channel, key *model.ChannelKey) int {
 	return defaultRateLimitCooldownSec
 }
 
-// IsAvailable reports whether a key can be used for a new attempt.
+// IsAvailable 判断 Key 当前是否可被选中。
+//
+// 429 冷却是“软屏蔽”，不是从 Keys 切片删除：
+//   - OnResult 收到 429 时写入 StatusCode=429 与 LastUseTimeStamp
+//   - 冷却期内本函数返回 false，Select/ListAvailable 自然跳过
+//   - 冷却结束后（now - LastUseTimeStamp >= cooldown）自动重新可用
+//     无需后台任务把 Key “补回可用列表”
 func IsAvailable(ch *model.Channel, k model.ChannelKey, nowSec int64) bool {
 	if !k.Enabled || k.ChannelKey == "" {
 		return false
@@ -45,7 +51,7 @@ func IsAvailable(ch *model.Channel, k model.ChannelKey, nowSec int64) bool {
 	return true
 }
 
-// ListAvailable returns keys that pass availability checks, excluding tried IDs.
+// ListAvailable 返回当前可用 Key（排除本请求已试过的 ID）。
 func ListAvailable(ch *model.Channel, exclude map[int]struct{}) []model.ChannelKey {
 	if ch == nil {
 		return nil
@@ -65,12 +71,12 @@ func ListAvailable(ch *model.Channel, exclude map[int]struct{}) []model.ChannelK
 	return out
 }
 
-// CountAvailable returns the number of currently usable keys.
+// CountAvailable 返回当前可用 Key 数量。
 func CountAvailable(ch *model.Channel) int {
 	return len(ListAvailable(ch, nil))
 }
 
-// Select picks one key by channel KeyMode from available keys (excluding tried).
+// Select 按渠道 KeyMode 从可用 Key 中选一个（排除本请求已失败的）。
 func Select(ch *model.Channel, exclude map[int]struct{}) (model.ChannelKey, bool) {
 	if ch == nil {
 		return model.ChannelKey{}, false
@@ -98,8 +104,8 @@ func Select(ch *model.Channel, exclude map[int]struct{}) (model.ChannelKey, bool
 	}
 }
 
-// selectRoundRobin walks the full enabled-key list by stable ID order so that
-// temporary unavailability (429) does not skew the rotation modulo.
+// selectRoundRobin 在完整 enabled Key 列表（按 ID 排序）上轮转。
+// 若起点 Key 因 429 不可用，则顺延下一个可用，避免只对“当前可用子集”取模导致分布偏斜。
 func selectRoundRobin(ch *model.Channel, exclude map[int]struct{}) (model.ChannelKey, bool) {
 	candidates := make([]model.ChannelKey, 0, len(ch.Keys))
 	for _, k := range ch.Keys {
@@ -170,12 +176,13 @@ func selectLeastCost(keys []model.ChannelKey) model.ChannelKey {
 	return best
 }
 
-// OnResult updates key state after an attempt.
-// - success: apply cost delta and status
-// - 429: mark rate-limited (cooldown via LastUseTimeStamp)
-// - 401/403: disable key immediately in DB
-// - other failures: update status/timestamp only
-// Empty key (ID==0) is a no-op for persistence.
+// OnResult 根据上游结果更新 Key 运行时状态（费用 / 冷却 / 禁用）。
+//
+//   - 2xx：累加 costDelta，刷新状态与最后使用时间
+//   - 429：写入 StatusCode+LastUseTimeStamp，进入冷却；到期后 IsAvailable 自动放行
+//   - 401/403：立即 Enabled=false 落库，需用户手动重新启用
+//   - 其他失败：只更新状态码与时间，不永久禁用
+//   - key.ID==0（allow_empty_key）：不落库
 func OnResult(ch *model.Channel, key model.ChannelKey, statusCode int, costDelta float64) {
 	if key.ID == 0 || ch == nil {
 		return
@@ -192,6 +199,7 @@ func OnResult(ch *model.Channel, key model.ChannelKey, statusCode int, costDelta
 		_ = op.ChannelKeyApplyUpdate(key.ID, ch.ID, statusCode, now, 0)
 		return
 	case http.StatusTooManyRequests:
+		// 软冷却：不删 Key、不改 Enabled；仅靠时间窗屏蔽，到期自动恢复可选。
 		_ = op.ChannelKeyApplyUpdate(key.ID, ch.ID, statusCode, now, 0)
 		return
 	}

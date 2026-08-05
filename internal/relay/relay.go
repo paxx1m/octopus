@@ -84,6 +84,8 @@ func newRelayRun(c *gin.Context, inboundType llm.APIFormat, inAdapter transforme
 	}, nil
 }
 
+// run 外层按分组候选渠道迭代；渠道内 Key 故障转移由 tryChannel 完成。
+// 只有 ok（完整成功）或 written（已向客户端写出，不可再试）才结束；否则继续下一渠道。
 func (r *relayRun) run() {
 	ctx := r.c.Request.Context()
 	var lastErr error
@@ -103,6 +105,7 @@ func (r *relayRun) run() {
 			return
 		}
 		if written {
+			// 流式已写出部分内容：不能换渠道，但 err 仍记失败（如客户端中途断开）。
 			r.metrics.Save(ctx, false, err, r.iter.Attempts())
 			return
 		}
@@ -118,8 +121,23 @@ func (r *relayRun) run() {
 	resp.Error(r.c, http.StatusBadGateway, lastErr.Error())
 }
 
-// tryChannel attempts the current group candidate channel with key fast-path / multi-key failover.
-// ok=true means success; written=true means response already sent (no more retries).
+// tryChannel 处理当前分组候选渠道，并在渠道内做 Key 快路径 / 多 Key 故障转移。
+//
+// 返回值语义：
+//   - ok=true：本次转发成功（可结束整个请求）
+//   - written=true：响应已开始写给客户端（流式首 token 已发出），不可再换渠道/Key
+//   - err：失败原因（written=false 时可被外层继续重试）
+//
+// 渠道内 Key 选择分层：
+//  1. allow_empty_key：不走 Key 管理器，直接空 Key 转发
+//  2. 0 可用 Key：跳过本渠道
+//  3. 1 可用 Key：单次尝试（仍走 OnResult / 熔断）
+//  4. ≥2 可用 Key：按 KeyMode 选择并在同渠道内故障转移，耗尽后再换渠道
+//
+// 429 冷却恢复说明：
+//  Key 被 429 后不会从列表物理删除，只是 IsAvailable 在冷却期内返回 false。
+//  冷却结束后（now - LastUseTimeStamp >= cooldown），下次 ListAvailable/Select
+//  会自动再次选中该 Key，无需后台任务“补回列表”。
 func (r *relayRun) tryChannel() (ok, written bool, err error) {
 	item := r.iter.Item()
 	channel, err := op.ChannelGet(item.ChannelID, r.c.Request.Context())
@@ -133,14 +151,15 @@ func (r *relayRun) tryChannel() (ok, written bool, err error) {
 		return false, false, nil
 	}
 
-	// Fast path: no API key required
+	// 无需 API Key 的上游：整次请求只用空 Key，失败后直接换下一渠道。
 	if channel.AllowEmptyKey {
 		return r.tryOneKey(channel, dbmodel.ChannelKey{}, item.ModelName)
 	}
 
-	// Sticky: only when this candidate is the sticky channel. Prefer sticky key;
-	// if that key is cooling down / failed, failover other keys in-channel without
-	// clearing channel affinity. Clear sticky only when the key is gone/disabled.
+	// 粘性会话：仅当当前候选就是粘性渠道时生效。
+	// - sticky key 仍可用：优先试它
+	// - sticky key 临时不可用（如 429 冷却）或本次失败：同渠道换其他 Key，保留渠道亲和
+	// - sticky key 已删除/永久禁用：清除会话粘性
 	exclude := map[int]struct{}{}
 	if r.iter.IsSticky() && r.stickyKeyID > 0 {
 		var stickyKey *dbmodel.ChannelKey
@@ -151,7 +170,6 @@ func (r *relayRun) tryChannel() (ok, written bool, err error) {
 			}
 		}
 		if stickyKey == nil || !stickyKey.Enabled || stickyKey.ChannelKey == "" {
-			// Key deleted or permanently disabled — drop session affinity.
 			balancer.ClearSticky(r.metrics.APIKeyID, r.metrics.RequestModel)
 			r.stickyKeyID = 0
 		} else if keymanager.IsAvailable(channel, *stickyKey, time.Now().Unix()) {
@@ -159,10 +177,10 @@ func (r *relayRun) tryChannel() (ok, written bool, err error) {
 			if success || written {
 				return success, written, err
 			}
-			// Failed attempt: try other keys in this channel, keep sticky channel.
+			// 本次 sticky key 失败：排除后继续同渠道其他 Key。
 			exclude[stickyKey.ID] = struct{}{}
 		} else {
-			// Temporary unavailability (e.g. 429 cooldown): skip sticky key, keep channel sticky.
+			// 冷却中：跳过 sticky key，但渠道亲和仍保留。
 			exclude[stickyKey.ID] = struct{}{}
 		}
 	}
@@ -173,13 +191,13 @@ func (r *relayRun) tryChannel() (ok, written bool, err error) {
 		r.iter.Skip(channel.ID, 0, channel.Name, "no available key")
 		return false, false, nil
 	case 1:
-		// Single key: one attempt, no manager select loop
+		// 单 Key：没有“换 Key”空间，只做一次真实转发。
 		return r.tryOneKey(channel, available[0], item.ModelName)
 	default:
-		// Multi-key: select + failover within channel until exhausted
+		// 多 Key：在同渠道内按策略选择并故障转移，直到无可用 Key。
 		var lastErr error
 		for {
-			// Re-load channel so 429/disabled state from prior attempts is visible
+			// 每次循环重新取缓存快照，使上一 Key 的 429/禁用状态对本循环可见。
 			if refreshed, getErr := op.ChannelGet(channel.ID, r.c.Request.Context()); getErr == nil {
 				channel = refreshed
 			}
@@ -194,6 +212,7 @@ func (r *relayRun) tryChannel() (ok, written bool, err error) {
 			if err != nil {
 				lastErr = err
 			}
+			// 本请求内不再重试该 Key（即使冷却逻辑上仍“可用”）。
 			exclude[key.ID] = struct{}{}
 		}
 		return false, false, lastErr
@@ -305,7 +324,12 @@ func parseRequest(c *gin.Context, inboundType llm.APIFormat, inAdapter transform
 	return internalRequest, nil
 }
 
-// forward 转发请求到上游服务
+// forward 转发请求到上游服务。
+// 返回的 statusCode 会进入 keymanager.OnResult / 熔断记录，必须尽量反映真实上游结果：
+//   - 上游 HTTP 错误：middleware 捕获的 StatusCode
+//   - 流式成功：200
+//   - 流式失败但已写出首 token：200（客户端已看到部分内容）
+//   - 流式失败且未写出：502（避免把失败记成成功冷却）
 func (ra *relayAttempt) forward() (int, error) {
 	ctx := ra.c.Request.Context()
 	if ra.internalRequest.RawRequest == nil {
@@ -319,6 +343,8 @@ func (ra *relayAttempt) forward() (int, error) {
 	}
 
 	relayMiddleware := &relayPipelineMiddleware{attempt: ra}
+	// 每次 attempt 新建 pipeline：出站适配器/渠道参数不同，且请求体可能被 ParamOverride 修改，
+	// 复用同一 pipeline 实例跨渠道不安全。Factory 本身很轻，主要成本在上游 RTT。
 	result, err := pipeline.NewFactory(httpclient.NewHttpClientWithClient(httpClient)).
 		Pipeline(
 			&parsedRequestInbound{Inbound: ra.inAdapter, request: ra.internalRequest},
@@ -335,7 +361,12 @@ func (ra *relayAttempt) forward() (int, error) {
 	}
 	if result.Stream {
 		if err := ra.writeStream(ctx, result.EventStream); err != nil {
-			return http.StatusOK, err
+			// 已向客户端写出 SSE 后不可再换渠道；状态仍按 200 记录（部分成功语义）。
+			// 尚未写出时返回 502，避免 OnResult 把失败当成功。
+			if ra.c.Writer.Written() {
+				return http.StatusOK, err
+			}
+			return http.StatusBadGateway, err
 		}
 		return http.StatusOK, nil
 	}
@@ -393,13 +424,24 @@ func (ra *relayAttempt) applyChannelRequestOptions(outboundRequest *httpclient.R
 	}
 }
 
-// writeStream 把 pipeline 输出的客户端格式流写回请求方，并保留首 token 超时切换通道的行为。
+// streamEventBufferMax 限制内存中缓存的 SSE 事件数量，仅用于最终日志聚合。
+// 超限后停止追加，仍继续转发；日志侧可能丢失后半段响应体。
+const streamEventBufferMax = 4096
+
+// writeStream 把 pipeline 输出的客户端格式流写回请求方。
+//
+// 设计要点：
+//  1. 读上游 stream 放在独立 goroutine，避免 Next() 阻塞导致首 token 超时/客户端断开无法处理。
+//  2. done 关闭后 reader 退出，主循环不再 Close stream（由 reader 的 defer 统一 Close，避免双关）。
+//  3. 客户端断开返回 error（不是 nil），避免外层记成成功并错误累加费用。
+//  4. 首 token 超时返回 error 且 Written()=false，外层可换渠道/Key。
+//  5. responseEvents 只服务日志聚合，有上限，避免超长流 OOM。
 func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.Stream[*httpclient.StreamEvent]) error {
 	if clientStream == nil {
 		return fmt.Errorf("empty pipeline stream")
 	}
 
-	// 设置 SSE 响应头
+	// SSE 响应头：在真正写出首个事件前设置；gin 会在首次 Write 时发送。
 	ra.c.Header("Content-Type", "text/event-stream")
 	ra.c.Header("Cache-Control", "no-cache")
 	ra.c.Header("Connection", "keep-alive")
@@ -407,6 +449,7 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 
 	firstToken := true
 	responseEvents := make([]*httpclient.StreamEvent, 0, 8)
+	eventsTruncated := false
 	type sseReadResult struct {
 		event *httpclient.StreamEvent
 		err   error
@@ -414,7 +457,9 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 	results := make(chan sseReadResult, 1)
 	done := make(chan struct{})
 	defer close(done)
+
 	go func() {
+		// 唯一 Close 点：正常结束、主循环退出（done）、ctx 取消、panic 都走这里。
 		defer close(results)
 		defer clientStream.Close()
 		defer func() {
@@ -427,7 +472,7 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 				}
 			}
 		}()
-		// Next 可能阻塞等待上游 token；放到协程里让首 token 超时和客户端断开都能及时打断本次通道尝试。
+		// Next 可能阻塞等待上游 token；协程化后主循环才能同时监听超时与断开。
 		for clientStream.Next() {
 			select {
 			case results <- sseReadResult{event: clientStream.Current()}:
@@ -462,12 +507,16 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 	for {
 		select {
 		case <-ctx.Done():
+			// 客户端断开：返回 error，由 run()/Save 记失败；stream Close 交给 reader defer。
 			log.Infof("client disconnected, stopping stream")
-			_ = clientStream.Close()
-			return nil
+			if ra.c.Writer.Written() {
+				// 已写出部分内容，无法换渠道，但仍应记失败避免费用/成功计数虚高。
+				return context.Canceled
+			}
+			return context.Canceled
 		case <-firstTokenC:
+			// 尚未写出首 token 时可换渠道；Close 由 reader 在 done 关闭后执行。
 			log.Warnf("first token timeout (%ds), switching channel", firstTokenTimeoutSec)
-			_ = clientStream.Close()
 			return fmt.Errorf("first token timeout (%ds)", firstTokenTimeoutSec)
 		case r, ok := <-results:
 			if !ok {
@@ -475,12 +524,14 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 				if len(responseEvents) == 0 {
 					return nil
 				}
-				// 客户端请求流式时，pipeline 只负责边转边写，不会自动生成完整响应体。
-				// 这里复用同一个 inbound 聚合器把已经写给客户端的事件合成最终 body，日志只落一次最终响应。
+				// 流式路径不会自动生成完整响应体；聚合已缓存事件仅用于日志与 usage。
 				responseBody, meta, err := ra.inAdapter.AggregateStreamChunks(context.WithoutCancel(ctx), responseEvents)
 				if err != nil {
 					log.Warnf("failed to aggregate stream response for log: %v", err)
 					return nil
+				}
+				if eventsTruncated {
+					log.Warnf("stream event buffer truncated at %d events; log body may be incomplete", streamEventBufferMax)
 				}
 				ra.metrics.InternalResponse = responseBody
 				ra.metrics.RecordUsage(meta.Usage)
@@ -494,8 +545,12 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 			if r.event == nil || len(r.event.Data) == 0 {
 				continue
 			}
-			// 这里只临时保存 pipeline 已经转换好的客户端格式事件，正常结束后聚合成最终响应体用于日志；不会把分片逐条落库。
-			responseEvents = append(responseEvents, r.event)
+			// 事件缓存仅服务最终日志；超限后仍转发，只是不再追加。
+			if len(responseEvents) < streamEventBufferMax {
+				responseEvents = append(responseEvents, r.event)
+			} else if !eventsTruncated {
+				eventsTruncated = true
+			}
 			if firstToken {
 				ra.metrics.FirstTokenTime = time.Now()
 				firstToken = false
