@@ -3,7 +3,9 @@
 # ---------- 前端构建 ----------
 FROM --platform=$BUILDPLATFORM node:22-bookworm AS frontend-builder
 
+# 与后端 ldflags 使用同一 BUILD_VERSION，避免前后端版本不一致误报
 ARG BUILD_VERSION=docker
+ENV VITE_APP_VERSION=$BUILD_VERSION
 
 WORKDIR /frontend
 COPY web/package.json web/pnpm-lock.yaml ./
@@ -43,6 +45,8 @@ FROM debian:bookworm-slim
 ENV TZ=Asia/Shanghai
 ENV PUID=0
 ENV PGID=0
+# 容器内禁止二进制自更新（应重建镜像），并避免与上游 release 误比
+ENV OCTOPUS_DISABLE_SELF_UPDATE=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \

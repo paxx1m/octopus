@@ -13,6 +13,10 @@ import (
 )
 
 func UpdateCore() error {
+	if SelfUpdateDisabled() {
+		return fmt.Errorf("self-update is disabled (set via %s_DISABLE_SELF_UPDATE); rebuild the container image instead", "OCTOPUS")
+	}
+
 	log.Infof("start update core")
 
 	filename, err := getDownloadFilename()

@@ -32,6 +32,19 @@ type LatestInfo struct {
 
 var github_pat = os.Getenv(strings.ToUpper(conf.APP_NAME) + "_GITHUB_PAT")
 
+// SelfUpdateDisabled reports whether binary self-update / remote version check is off.
+// Set OCTOPUS_DISABLE_SELF_UPDATE=1 (or true/yes) for Docker/fork builds that should
+// not compare against or download from upstream bestruirui/octopus releases.
+func SelfUpdateDisabled() bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(strings.ToUpper(conf.APP_NAME) + "_DISABLE_SELF_UPDATE")))
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 // doRequestWithFallback performs an HTTP GET request, first without proxy, then with proxy if failed.
 func doRequestWithFallback(url string) ([]byte, error) {
 	data, err := doRequest(url, false)
@@ -77,6 +90,15 @@ func doRequest(url string, useProxy bool) ([]byte, error) {
 }
 
 func GetLatestInfo() (*LatestInfo, error) {
+	// Docker/fork: report current version as "latest" so UI will not prompt to upgrade
+	// against hard-coded upstream releases (which would overwrite the fork build).
+	if SelfUpdateDisabled() {
+		return &LatestInfo{
+			TagName: conf.Version,
+			Body:    "self-update disabled",
+		}, nil
+	}
+
 	body, err := doRequestWithFallback(updateApiUrl)
 	if err != nil {
 		return nil, err

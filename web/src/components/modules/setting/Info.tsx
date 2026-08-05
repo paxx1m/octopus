@@ -14,11 +14,20 @@ export function SettingInfo() {
 
     const backendNowVersion = nowVersionQuery.data || '';
     const latestVersion = latestInfoQuery.data?.tag_name || '';
+    // Docker/自建镜像常注入 docker/dev；与上游 release 不可比，也不应提示「立即更新」
+    const isUnversionedBuild = /^(docker|dev|unknown)$/i.test(backendNowVersion) || /^(docker|dev|unknown)$/i.test(APP_VERSION);
 
-    // 前端版本与后端当前版本不一致 → 浏览器缓存问题
-    const isCacheMismatch = !!backendNowVersion && backendNowVersion !== APP_VERSION;
+    // 前端版本与后端当前版本不一致 → 浏览器缓存问题（未版本化构建不误报）
+    const isCacheMismatch =
+        !!backendNowVersion &&
+        !isUnversionedBuild &&
+        backendNowVersion !== APP_VERSION;
     // 最新版本与后端当前版本不一致 → 有新版本可更新
-    const hasNewVersion = latestVersion && backendNowVersion && latestVersion !== backendNowVersion;
+    const hasNewVersion =
+        !isUnversionedBuild &&
+        !!latestVersion &&
+        !!backendNowVersion &&
+        latestVersion !== backendNowVersion;
 
     const clearCacheAndReload = async () => {
         // 通知 Service Worker 清理缓存
