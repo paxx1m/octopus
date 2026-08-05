@@ -1,7 +1,8 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '@/lib/utils';
+import { lockBodyScroll, unlockBodyScroll, PORTAL_OVERLAY_ATTR } from '@/lib/body-scroll-lock';
 
 type PortalOverlayProps = {
     open: boolean;
@@ -16,7 +17,7 @@ type PortalOverlayProps = {
 
 /**
  * Fixed centered overlay via portal — avoids parent overflow clipping on mobile.
- * Optional layoutId keeps morph animation with motion triggers.
+ * Nested-safe with MorphingDialog (body lock ref-count, Esc stops at top layer).
  */
 export function PortalOverlay({
     open,
@@ -26,46 +27,65 @@ export function PortalOverlay({
     className,
     lockScroll = true,
 }: PortalOverlayProps) {
+    const [mounted, setMounted] = useState(false);
+
+    useEffect(() => {
+        setMounted(true);
+    }, []);
+
     useEffect(() => {
         if (!open || !lockScroll) return;
-        document.body.classList.add('overflow-hidden');
-        return () => {
-            document.body.classList.remove('overflow-hidden');
-        };
+        lockBodyScroll();
+        return () => unlockBodyScroll();
     }, [open, lockScroll]);
 
     useEffect(() => {
         if (!open) return;
         const onKey = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose();
+            if (e.key !== 'Escape') return;
+            e.stopPropagation();
+            e.preventDefault();
+            onClose();
         };
-        document.addEventListener('keydown', onKey);
-        return () => document.removeEventListener('keydown', onKey);
+        document.addEventListener('keydown', onKey, true);
+        return () => document.removeEventListener('keydown', onKey, true);
     }, [open, onClose]);
 
-    if (!open || typeof document === 'undefined') return null;
+    if (!mounted) return null;
 
     return createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-                className="absolute inset-0 bg-white/40 backdrop-blur-xs dark:bg-black/40"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={onClose}
-            />
-            <motion.div
-                layoutId={layoutId}
-                className={cn(
-                    'relative z-10 max-h-[min(80dvh,calc(100dvh-2rem))] w-[min(420px,calc(100vw-2rem))] overflow-y-auto overscroll-contain rounded-3xl border border-border bg-card p-5',
-                    className,
-                )}
-                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-                onClick={(e) => e.stopPropagation()}
-            >
-                {children}
-            </motion.div>
-        </div>,
+        <AnimatePresence>
+            {open ? (
+                <motion.div
+                    key="portal-overlay-root"
+                    {...{ [PORTAL_OVERLAY_ATTR]: '' }}
+                    className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                >
+                    <div
+                        className="absolute inset-0 bg-white/40 backdrop-blur-xs dark:bg-black/40"
+                        onClick={onClose}
+                        aria-hidden
+                    />
+                    <motion.div
+                        layoutId={layoutId}
+                        className={cn(
+                            'relative z-10 max-h-[min(80dvh,calc(100dvh-2rem))] w-[min(420px,calc(100vw-2rem))] overflow-y-auto overscroll-contain rounded-3xl border border-border bg-card p-5',
+                            className,
+                        )}
+                        initial={{ opacity: 0, scale: 0.96 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.96 }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {children}
+                    </motion.div>
+                </motion.div>
+            ) : null}
+        </AnimatePresence>,
         document.body,
     );
 }

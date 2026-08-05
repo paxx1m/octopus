@@ -18,6 +18,7 @@ import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { XIcon } from 'lucide-react';
 import useClickOutside from '@/hooks/useClickOutside';
+import { lockBodyScroll, unlockBodyScroll, PORTAL_OVERLAY_ATTR } from '@/lib/body-scroll-lock';
 
 export type MorphingDialogContextType = {
   isOpen: boolean;
@@ -181,9 +182,12 @@ function MorphingDialogContent({
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        // Nested PortalOverlay handles Esc in capture phase; skip if still open
+        if (document.querySelector(`[${PORTAL_OVERLAY_ATTR}]`)) return;
         setIsOpen(false);
       }
       if (event.key === 'Tab') {
+        if (document.querySelector(`[${PORTAL_OVERLAY_ATTR}]`)) return;
         refreshFocusable();
         if (!firstFocusableElementRef.current || !lastFocusableElementRef.current) return;
 
@@ -209,18 +213,14 @@ function MorphingDialogContent({
   }, [setIsOpen, refreshFocusable]);
 
   useEffect(() => {
-    if (isOpen) {
-      document.body.classList.add('overflow-hidden');
-      const first = refreshFocusable();
-      first?.focus();
-    } else {
-      document.body.classList.remove('overflow-hidden');
+    if (!isOpen) {
       triggerRef.current?.focus();
+      return;
     }
-
-    return () => {
-      document.body.classList.remove('overflow-hidden');
-    };
+    lockBodyScroll();
+    const first = refreshFocusable();
+    first?.focus();
+    return () => unlockBodyScroll();
   }, [isOpen, triggerRef, refreshFocusable]);
 
   useEffect(() => {
@@ -241,6 +241,9 @@ function MorphingDialogContent({
     },
     (event) => {
       const target = event.target as HTMLElement | null;
+      if (target?.closest(`[${PORTAL_OVERLAY_ATTR}]`)) {
+        return true;
+      }
       if (target?.closest('[data-slot="select-content"]')) {
         return true;
       }

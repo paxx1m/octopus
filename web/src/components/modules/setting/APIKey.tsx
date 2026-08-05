@@ -15,6 +15,7 @@ import {
     useMorphingDialog,
 } from '@/components/ui/morphing-dialog';
 import { PortalOverlay } from '@/components/common/PortalOverlay';
+import { dialogPanelClass } from '@/components/common/DialogShell';
 import {
     useAPIKeyList,
     useCreateAPIKey,
@@ -344,6 +345,7 @@ function APIKeyForm({ apiKey, isPending, submitLabel, onSubmit, onClose }: APIKe
 }
 
 function APIKeyFormOverlay({
+    open,
     layoutId,
     apiKey,
     isPending,
@@ -351,6 +353,7 @@ function APIKeyFormOverlay({
     onSubmit,
     onClose,
 }: {
+    open: boolean;
     layoutId: string;
     apiKey?: APIKey;
     isPending: boolean;
@@ -359,8 +362,9 @@ function APIKeyFormOverlay({
     onClose: () => void;
 }) {
     return (
-        <PortalOverlay open onClose={onClose} layoutId={layoutId}>
+        <PortalOverlay open={open} onClose={onClose} layoutId={layoutId}>
             <APIKeyForm
+                key={apiKey?.id ?? 'new'}
                 apiKey={apiKey}
                 isPending={isPending}
                 submitLabel={submitLabel}
@@ -372,86 +376,95 @@ function APIKeyFormOverlay({
 }
 
 function APIKeyStatsCard({
+    open,
     layoutId,
     apiKey,
     onClose,
 }: {
+    open: boolean;
     layoutId: string;
-    apiKey: APIKey;
+    apiKey: APIKey | null;
     onClose: () => void;
 }) {
     const t = useTranslations('setting');
     const { data: statsList = [] } = useStatsAPIKey();
-    const stats = useMemo(() => statsList.find((s) => s.api_key_id === apiKey.id), [statsList, apiKey.id]);
+    const stats = useMemo(
+        () => (apiKey ? statsList.find((s) => s.api_key_id === apiKey.id) : undefined),
+        [statsList, apiKey],
+    );
 
     return (
         <PortalOverlay
-            open
+            open={open}
             onClose={onClose}
             layoutId={layoutId}
             className="w-[min(320px,calc(100vw-2rem))]"
         >
-            <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="line-clamp-1 text-sm font-semibold text-card-foreground">
-                    {apiKey.name}
-                </h3>
-                <button
-                    type="button"
-                    onClick={onClose}
-                    className="flex size-8 items-center justify-center rounded-lg bg-muted text-muted-foreground transition-colors hover:bg-muted/80"
-                >
-                    <X className="size-4" />
-                </button>
-            </div>
+            {apiKey ? (
+                <>
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                        <h3 className="line-clamp-1 text-sm font-semibold text-card-foreground">
+                            {apiKey.name}
+                        </h3>
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="flex size-8 items-center justify-center rounded-lg bg-muted text-muted-foreground transition-colors hover:bg-muted/80"
+                        >
+                            <X className="size-4" />
+                        </button>
+                    </div>
 
-            {!stats ? (
-                <div className="text-sm text-muted-foreground">{t('apiKey.stats.noData')}</div>
-            ) : (
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div className="rounded-lg bg-muted/40 p-3">
-                        <div className="text-xs text-muted-foreground">{t('apiKey.stats.inputToken')}</div>
-                        <div className="font-medium tabular-nums">
-                            {stats.input_token.formatted.value}
-                            {stats.input_token.formatted.unit}
+                    {!stats ? (
+                        <div className="text-sm text-muted-foreground">{t('apiKey.stats.noData')}</div>
+                    ) : (
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                            <div className="rounded-lg bg-muted/40 p-3">
+                                <div className="text-xs text-muted-foreground">{t('apiKey.stats.inputToken')}</div>
+                                <div className="font-medium tabular-nums">
+                                    {stats.input_token.formatted.value}
+                                    {stats.input_token.formatted.unit}
+                                </div>
+                            </div>
+                            <div className="rounded-lg bg-muted/40 p-3">
+                                <div className="text-xs text-muted-foreground">{t('apiKey.stats.outputToken')}</div>
+                                <div className="font-medium tabular-nums">
+                                    {stats.output_token.formatted.value}
+                                    {stats.output_token.formatted.unit}
+                                </div>
+                            </div>
+                            <div className="rounded-lg bg-muted/40 p-3">
+                                <div className="text-xs text-muted-foreground">{t('apiKey.stats.inputCost')}</div>
+                                <div className="font-medium tabular-nums">
+                                    {stats.input_cost.formatted.value}
+                                    {stats.input_cost.formatted.unit}
+                                </div>
+                            </div>
+                            <div className="rounded-lg bg-muted/40 p-3">
+                                <div className="text-xs text-muted-foreground">{t('apiKey.stats.outputCost')}</div>
+                                <div className="font-medium tabular-nums">
+                                    {stats.output_cost.formatted.value}
+                                    {stats.output_cost.formatted.unit}
+                                </div>
+                            </div>
+                            <div className="rounded-lg bg-muted/40 p-3">
+                                <div className="text-xs text-muted-foreground">{t('apiKey.stats.requestSuccess')}</div>
+                                <div className="font-medium tabular-nums">
+                                    {stats.request_success.formatted.value}
+                                    {stats.request_success.formatted.unit}
+                                </div>
+                            </div>
+                            <div className="rounded-lg bg-muted/40 p-3">
+                                <div className="text-xs text-muted-foreground">{t('apiKey.stats.requestFailed')}</div>
+                                <div className="font-medium tabular-nums">
+                                    {stats.request_failed.formatted.value}
+                                    {stats.request_failed.formatted.unit}
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                    <div className="rounded-lg bg-muted/40 p-3">
-                        <div className="text-xs text-muted-foreground">{t('apiKey.stats.outputToken')}</div>
-                        <div className="font-medium tabular-nums">
-                            {stats.output_token.formatted.value}
-                            {stats.output_token.formatted.unit}
-                        </div>
-                    </div>
-                    <div className="rounded-lg bg-muted/40 p-3">
-                        <div className="text-xs text-muted-foreground">{t('apiKey.stats.inputCost')}</div>
-                        <div className="font-medium tabular-nums">
-                            {stats.input_cost.formatted.value}
-                            {stats.input_cost.formatted.unit}
-                        </div>
-                    </div>
-                    <div className="rounded-lg bg-muted/40 p-3">
-                        <div className="text-xs text-muted-foreground">{t('apiKey.stats.outputCost')}</div>
-                        <div className="font-medium tabular-nums">
-                            {stats.output_cost.formatted.value}
-                            {stats.output_cost.formatted.unit}
-                        </div>
-                    </div>
-                    <div className="rounded-lg bg-muted/40 p-3">
-                        <div className="text-xs text-muted-foreground">{t('apiKey.stats.requestSuccess')}</div>
-                        <div className="font-medium tabular-nums">
-                            {stats.request_success.formatted.value}
-                            {stats.request_success.formatted.unit}
-                        </div>
-                    </div>
-                    <div className="rounded-lg bg-muted/40 p-3">
-                        <div className="text-xs text-muted-foreground">{t('apiKey.stats.requestFailed')}</div>
-                        <div className="font-medium tabular-nums">
-                            {stats.request_failed.formatted.value}
-                            {stats.request_failed.formatted.unit}
-                        </div>
-                    </div>
-                </div>
-            )}
+                    )}
+                </>
+            ) : null}
         </PortalOverlay>
     );
 }
@@ -660,34 +673,34 @@ function APIKeyPanelBase({
                 </div>
             </div>
 
-            {isAdding && (
-                <APIKeyFormOverlay
-                    layoutId={addLayoutId}
-                    isPending={createAPIKey.isPending}
-                    submitLabel={t('apiKey.form.create')}
-                    onSubmit={handleCreate}
-                    onClose={() => setIsAdding(false)}
-                />
-            )}
+            <APIKeyFormOverlay
+                open={isAdding}
+                layoutId={addLayoutId}
+                isPending={createAPIKey.isPending}
+                submitLabel={t('apiKey.form.create')}
+                onSubmit={handleCreate}
+                onClose={() => setIsAdding(false)}
+            />
 
-            {viewingStats && (
-                <APIKeyStatsCard
-                    layoutId={viewingStats.layoutId}
-                    apiKey={viewingStats.apiKey}
-                    onClose={() => setViewingStats(null)}
-                />
-            )}
+            <APIKeyStatsCard
+                open={!!viewingStats}
+                layoutId={viewingStats?.layoutId ?? `${statsPrefix}-idle`}
+                apiKey={viewingStats?.apiKey ?? null}
+                onClose={() => setViewingStats(null)}
+            />
 
-            {editingKey && (
-                <APIKeyFormOverlay
-                    layoutId={editingKey.layoutId}
-                    apiKey={editingKey.apiKey}
-                    isPending={updateAPIKey.isPending}
-                    submitLabel={t('apiKey.form.save')}
-                    onSubmit={(data) => handleUpdate(editingKey.apiKey, data)}
-                    onClose={() => setEditingKey(null)}
-                />
-            )}
+            <APIKeyFormOverlay
+                open={!!editingKey}
+                layoutId={editingKey?.layoutId ?? `${editPrefix}-idle`}
+                apiKey={editingKey?.apiKey}
+                isPending={updateAPIKey.isPending}
+                submitLabel={t('apiKey.form.save')}
+                onSubmit={(data) => {
+                    if (!editingKey) return;
+                    handleUpdate(editingKey.apiKey, data);
+                }}
+                onClose={() => setEditingKey(null)}
+            />
 
             <div className={listClassName}>
                 {apiKeysLoading ? (
@@ -740,7 +753,7 @@ function APIKeyDialogPanel() {
     return (
         <APIKeyPanelBase
             idPrefix="apikey-dialog"
-            containerClassName="rounded-3xl border border-border bg-card p-6 space-y-5 relative w-screen max-w-full md:max-w-xl"
+            containerClassName="relative w-full space-y-5"
             listClassName="h-[min(70dvh,calc(100dvh-10rem))] space-y-2 overflow-y-auto"
             renderHeaderExtra={() => (
                 <button
@@ -768,7 +781,7 @@ export function SettingAPIKey() {
                         <Maximize2 className="size-4" />
                     </MorphingDialogTrigger>
                     <MorphingDialogContainer>
-                        <MorphingDialogContent className="relative rounded-3xl bg-card">
+                        <MorphingDialogContent className={dialogPanelClass('md')}>
                             <APIKeyDialogPanel />
                         </MorphingDialogContent>
                     </MorphingDialogContainer>

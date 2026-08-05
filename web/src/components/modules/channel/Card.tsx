@@ -12,6 +12,7 @@ import { useTranslations } from 'use-intl';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/animate-ui/components/animate/tooltip';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/common/Toast';
+import { dialogPanelClass } from '@/components/common/DialogShell';
 
 export function Card({ channel, stats, layout = 'grid' }: { channel: Channel; stats: StatsMetricsFormatted; layout?: 'grid' | 'list' }) {
     const t = useTranslations('channel.card');
@@ -151,7 +152,7 @@ export function Card({ channel, stats, layout = 'grid' }: { channel: Channel; st
             </MorphingDialogTrigger>
 
             <MorphingDialogContainer>
-                <MorphingDialogContent className="w-[min(36rem,calc(100vw-2rem))] rounded-3xl bg-card px-4 py-2 text-card-foreground sm:px-4">
+                <MorphingDialogContent className={dialogPanelClass('md', { className: 'py-2' })}>
                     <CardContent channel={channel} stats={stats} />
                 </MorphingDialogContent>
             </MorphingDialogContainer>

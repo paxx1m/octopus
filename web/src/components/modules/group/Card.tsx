@@ -26,7 +26,7 @@ import {
     MorphingDialogTrigger,
     useMorphingDialog,
 } from '@/components/ui/morphing-dialog';
-import { DialogShell } from '@/components/common/DialogShell';
+import { DialogShell, dialogPanelClass } from '@/components/common/DialogShell';
 
 interface EditDialogContentProps {
     group: Group;
@@ -196,7 +196,7 @@ export function GroupCard({ group }: { group: Group }) {
                         </MorphingDialogTrigger>
 
                         <MorphingDialogContainer>
-                            <MorphingDialogContent className="h-[min(90dvh,calc(100dvh-2rem))] w-[min(56rem,calc(100vw-2rem))] rounded-3xl bg-card px-4 py-4 text-card-foreground sm:px-6">
+                            <MorphingDialogContent className={dialogPanelClass('lg', { fixedHeight: true })}>
                                 <EditDialogContent
                                     group={group}
                                     displayMembers={displayMembers}

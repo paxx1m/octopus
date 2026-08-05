@@ -11,6 +11,7 @@ import { getModelIcon } from '@/lib/model-icons';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { CopyIconButton } from '@/components/common/CopyButton';
+import { dialogPanelClass } from '@/components/common/DialogShell';
 import {
     MorphingDialog,
     MorphingDialogTrigger,
@@ -279,7 +280,7 @@ export function LogCard({ log }: { log: RelayLog }) {
                 </MorphingDialogTrigger>
 
                 <MorphingDialogContainer>
-                    <MorphingDialogContent className="relative flex h-[min(90dvh,calc(100dvh-2rem))] w-[min(80vw,calc(100vw-2rem))] flex-col overflow-hidden rounded-3xl bg-card px-4 py-4 text-card-foreground sm:px-6">
+                    <MorphingDialogContent className={dialogPanelClass('xl', { fixedHeight: true })}>
                         <MorphingDialogClose className="top-4 right-5 text-muted-foreground hover:text-foreground transition-colors" />
                         <MorphingDialogTitle className="mb-3 flex shrink-0 items-center gap-2 text-sm">
                             <ModelAvatar size={28} />
