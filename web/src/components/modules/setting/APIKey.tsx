@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useId, useMemo, useState } from 'react';
 import { useTranslations } from 'use-intl';
 import { KeyRound, Plus, Loader, Trash2, Check, X, Info, CalendarDays, Pencil, Maximize2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -14,6 +14,7 @@ import {
     MorphingDialogTrigger,
     useMorphingDialog,
 } from '@/components/ui/morphing-dialog';
+import { PortalOverlay } from '@/components/common/PortalOverlay';
 import {
     useAPIKeyList,
     useCreateAPIKey,
@@ -358,11 +359,7 @@ function APIKeyFormOverlay({
     onClose: () => void;
 }) {
     return (
-        <motion.div
-            layoutId={layoutId}
-            className="absolute left-1/2 top-1/2 z-20 w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 bg-card p-5 rounded-3xl border border-border max-h-[80vh] overflow-auto"
-            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-        >
+        <PortalOverlay open onClose={onClose} layoutId={layoutId}>
             <APIKeyForm
                 apiKey={apiKey}
                 isPending={isPending}
@@ -370,7 +367,7 @@ function APIKeyFormOverlay({
                 onSubmit={onSubmit}
                 onClose={onClose}
             />
-        </motion.div>
+        </PortalOverlay>
     );
 }
 
@@ -388,19 +385,20 @@ function APIKeyStatsCard({
     const stats = useMemo(() => statsList.find((s) => s.api_key_id === apiKey.id), [statsList, apiKey.id]);
 
     return (
-        <motion.div
+        <PortalOverlay
+            open
+            onClose={onClose}
             layoutId={layoutId}
-            className="absolute left-1/2 top-1/2 z-30 w-[min(320px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex flex-col bg-card p-5 rounded-3xl border border-border max-h-[80vh] overflow-auto"
-            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+            className="w-[min(320px,calc(100vw-2rem))]"
         >
-            <div className="flex items-center justify-between gap-2 mb-3">
-                <h3 className="text-sm font-semibold text-card-foreground line-clamp-1">
+            <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="line-clamp-1 text-sm font-semibold text-card-foreground">
                     {apiKey.name}
                 </h3>
                 <button
                     type="button"
                     onClick={onClose}
-                    className="size-8 flex items-center justify-center rounded-lg bg-muted text-muted-foreground transition-colors hover:bg-muted/80"
+                    className="flex size-8 items-center justify-center rounded-lg bg-muted text-muted-foreground transition-colors hover:bg-muted/80"
                 >
                     <X className="size-4" />
                 </button>
@@ -454,7 +452,7 @@ function APIKeyStatsCard({
                     </div>
                 </div>
             )}
-        </motion.div>
+        </PortalOverlay>
     );
 }
 
@@ -662,40 +660,34 @@ function APIKeyPanelBase({
                 </div>
             </div>
 
-            <AnimatePresence>
-                {isAdding && (
-                    <APIKeyFormOverlay
-                        layoutId={addLayoutId}
-                        isPending={createAPIKey.isPending}
-                        submitLabel={t('apiKey.form.create')}
-                        onSubmit={handleCreate}
-                        onClose={() => setIsAdding(false)}
-                    />
-                )}
-            </AnimatePresence>
+            {isAdding && (
+                <APIKeyFormOverlay
+                    layoutId={addLayoutId}
+                    isPending={createAPIKey.isPending}
+                    submitLabel={t('apiKey.form.create')}
+                    onSubmit={handleCreate}
+                    onClose={() => setIsAdding(false)}
+                />
+            )}
 
-            <AnimatePresence>
-                {viewingStats && (
-                    <APIKeyStatsCard
-                        layoutId={viewingStats.layoutId}
-                        apiKey={viewingStats.apiKey}
-                        onClose={() => setViewingStats(null)}
-                    />
-                )}
-            </AnimatePresence>
+            {viewingStats && (
+                <APIKeyStatsCard
+                    layoutId={viewingStats.layoutId}
+                    apiKey={viewingStats.apiKey}
+                    onClose={() => setViewingStats(null)}
+                />
+            )}
 
-            <AnimatePresence>
-                {editingKey && (
-                    <APIKeyFormOverlay
-                        layoutId={editingKey.layoutId}
-                        apiKey={editingKey.apiKey}
-                        isPending={updateAPIKey.isPending}
-                        submitLabel={t('apiKey.form.save')}
-                        onSubmit={(data) => handleUpdate(editingKey.apiKey, data)}
-                        onClose={() => setEditingKey(null)}
-                    />
-                )}
-            </AnimatePresence>
+            {editingKey && (
+                <APIKeyFormOverlay
+                    layoutId={editingKey.layoutId}
+                    apiKey={editingKey.apiKey}
+                    isPending={updateAPIKey.isPending}
+                    submitLabel={t('apiKey.form.save')}
+                    onSubmit={(data) => handleUpdate(editingKey.apiKey, data)}
+                    onClose={() => setEditingKey(null)}
+                />
+            )}
 
             <div className={listClassName}>
                 {apiKeysLoading ? (
@@ -749,7 +741,7 @@ function APIKeyDialogPanel() {
         <APIKeyPanelBase
             idPrefix="apikey-dialog"
             containerClassName="rounded-3xl border border-border bg-card p-6 space-y-5 relative w-screen max-w-full md:max-w-xl"
-            listClassName="space-y-2 h-[calc(100vh-10rem)] overflow-y-auto"
+            listClassName="h-[min(70dvh,calc(100dvh-10rem))] space-y-2 overflow-y-auto"
             renderHeaderExtra={() => (
                 <button
                     type="button"
@@ -776,7 +768,7 @@ export function SettingAPIKey() {
                         <Maximize2 className="size-4" />
                     </MorphingDialogTrigger>
                     <MorphingDialogContainer>
-                        <MorphingDialogContent className="relative">
+                        <MorphingDialogContent className="relative rounded-3xl bg-card">
                             <APIKeyDialogPanel />
                         </MorphingDialogContent>
                     </MorphingDialogContainer>

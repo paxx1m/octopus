@@ -279,9 +279,9 @@ export function LogCard({ log }: { log: RelayLog }) {
                 </MorphingDialogTrigger>
 
                 <MorphingDialogContainer>
-                    <MorphingDialogContent className="relative w-[calc(100vw-2rem)] md:w-[80vw] bg-card text-card-foreground px-6 py-4 rounded-3xl h-[calc(100vh-2rem)] flex flex-col overflow-hidden">
+                    <MorphingDialogContent className="relative flex h-[min(90dvh,calc(100dvh-2rem))] w-[min(80vw,calc(100vw-2rem))] flex-col overflow-hidden rounded-3xl bg-card px-4 py-4 text-card-foreground sm:px-6">
                         <MorphingDialogClose className="top-4 right-5 text-muted-foreground hover:text-foreground transition-colors" />
-                        <MorphingDialogTitle className="flex items-center gap-2 mb-3 text-sm">
+                        <MorphingDialogTitle className="mb-3 flex shrink-0 items-center gap-2 text-sm">
                             <ModelAvatar size={28} />
                             <span className="font-semibold text-card-foreground">{log.request_model_name}</span>
                             <ArrowRight className="size-3.5 text-muted-foreground/50" />
@@ -306,8 +306,8 @@ export function LogCard({ log }: { log: RelayLog }) {
                             )}
                         </MorphingDialogTitle>
 
-                        <MorphingDialogDescription className="flex-1 min-h-0">
-                            <div className="flex flex-col min-h-0 h-full gap-4">
+                        <MorphingDialogDescription className="min-h-0 flex-1 overflow-y-auto overscroll-contain md:overflow-hidden">
+                            <div className="flex h-full min-h-0 flex-col gap-4">
                                 {(hasError || hasMultipleAttempts) && (
                                     <div className={cn(
                                         "flex-initial min-h-0 flex flex-col rounded-2xl border overflow-hidden max-h-[40%]",

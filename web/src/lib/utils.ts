@@ -18,7 +18,8 @@ function formatNumber(num: number | undefined, compare: number[], units: string[
 export function formatCount(num: number | undefined): { raw: number, formatted: { value: string, unit: string } } {
   return {
     raw: num ?? 0,
-    formatted: formatNumber(num, [1000000000, 1000000, 1000, 1], ['', 'B', 'M', 'K', '', '']),
+    // units: [>=1B, >=1M, >=1K, >=1, fallback]
+    formatted: formatNumber(num, [1_000_000_000, 1_000_000, 1_000, 1], ['', 'B', 'M', 'K', '', '']),
   };
 }
 export function formatMoney(num: number | undefined): { raw: number, formatted: { value: string, unit: string } } {

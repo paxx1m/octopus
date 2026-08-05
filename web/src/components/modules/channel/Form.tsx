@@ -73,20 +73,25 @@ export function ChannelForm({
     const t = useTranslations('channel.form');
 
     // Ensure the form always shows at least 1 row for base_urls / keys / custom_header.
-    // This avoids "empty list" UI and also keeps URL + APIKEY layout consistent.
+    const baseUrlsLen = formData.base_urls?.length ?? 0;
+    const keysLen = formData.keys?.length ?? 0;
+    const headersLen = formData.custom_header?.length ?? 0;
+    const allowEmptyKey = formData.allow_empty_key;
     useEffect(() => {
-        if (!formData.base_urls || formData.base_urls.length === 0) {
+        if (baseUrlsLen === 0) {
             onFormDataChange({ ...formData, base_urls: [{ url: '', delay: 0 }] });
             return;
         }
-        if (!formData.allow_empty_key && (!formData.keys || formData.keys.length === 0)) {
+        if (!allowEmptyKey && keysLen === 0) {
             onFormDataChange({ ...formData, keys: [defaultKeyItem()] });
             return;
         }
-        if (!formData.custom_header || formData.custom_header.length === 0) {
+        if (headersLen === 0) {
             onFormDataChange({ ...formData, custom_header: [{ header_key: '', header_value: '' }] });
         }
-    }, [formData, onFormDataChange]);
+        // Only react to list emptiness / allow_empty_key — not every form keystroke.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [baseUrlsLen, keysLen, headersLen, allowEmptyKey, onFormDataChange]);
 
     const autoModels = formData.model
         ? formData.model.split(',').map((m) => m.trim()).filter(Boolean)

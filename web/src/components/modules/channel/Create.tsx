@@ -1,12 +1,9 @@
 import { useState } from 'react';
-import {
-    MorphingDialogClose,
-    MorphingDialogTitle,
-    MorphingDialogDescription,
-    useMorphingDialog,
-} from '@/components/ui/morphing-dialog';
+import { useMorphingDialog } from '@/components/ui/morphing-dialog';
+import { DialogShell } from '@/components/common/DialogShell';
 import { useCreateChannel } from '@/api/endpoints/channel';
 import { useTranslations } from 'use-intl';
+import { toast } from '@/components/common/Toast';
 import {
     ChannelForm,
     emptyChannelForm,
@@ -54,36 +51,24 @@ export function CreateDialogContent() {
                     setFormData(emptyChannelForm());
                     setIsOpen(false);
                 },
+                onError: (error) => {
+                    toast.error(t('createFailed'), { description: error.message });
+                },
             },
         );
     };
 
     return (
-        <div className="w-screen max-w-full md:max-w-xl h-full min-h-0 flex flex-col">
-            <MorphingDialogTitle className="shrink-0">
-                <header className="mb-6 flex items-center justify-between">
-                    <h2 className="text-2xl font-bold text-card-foreground">{t('dialogTitle')}</h2>
-                    <MorphingDialogClose
-                        className="relative right-0 top-0"
-                        variants={{
-                            initial: { opacity: 0, scale: 0.8 },
-                            animate: { opacity: 1, scale: 1 },
-                            exit: { opacity: 0, scale: 0.8 },
-                        }}
-                    />
-                </header>
-            </MorphingDialogTitle>
-            <MorphingDialogDescription className="flex-1 min-h-0 overflow-y-auto">
-                <ChannelForm
-                    formData={formData}
-                    onFormDataChange={setFormData}
-                    onSubmit={handleSubmit}
-                    isPending={createChannel.isPending}
-                    submitText={t('submit')}
-                    pendingText={t('submitting')}
-                    idPrefix="create-channel"
-                />
-            </MorphingDialogDescription>
-        </div>
+        <DialogShell title={t('dialogTitle')} size="md" scroll="body">
+            <ChannelForm
+                formData={formData}
+                onFormDataChange={setFormData}
+                onSubmit={handleSubmit}
+                isPending={createChannel.isPending}
+                submitText={t('submit')}
+                pendingText={t('submitting')}
+                idPrefix="create-channel"
+            />
+        </DialogShell>
     );
 }

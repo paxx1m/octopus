@@ -410,7 +410,8 @@
             "updated": "模型价格已更新",
             "updateFailed": "更新失败",
             "deleted": "模型已删除",
-            "deleteFailed": "删除失败"
+            "deleteFailed": "删除失败",
+            "createFailed": "创建模型失败"
         },
         "card": {
             "inputCache": "输入/缓存",
@@ -501,7 +502,8 @@
         "create": {
             "dialogTitle": "创建新渠道",
             "submit": "创建渠道",
-            "submitting": "创建中..."
+            "submitting": "创建中...",
+            "createFailed": "创建渠道失败"
         },
         "form": {
             "add": "添加",

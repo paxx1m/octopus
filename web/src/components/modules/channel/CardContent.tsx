@@ -12,12 +12,9 @@ import {
     Key
 } from 'lucide-react';
 import { useUpdateChannel, useDeleteChannel, KeyMode, type Channel, type UpdateChannelRequest } from '@/api/endpoints/channel';
-import {
-    MorphingDialogTitle,
-    MorphingDialogDescription,
-    MorphingDialogClose,
-    useMorphingDialog,
-} from '@/components/ui/morphing-dialog';
+import { useMorphingDialog } from '@/components/ui/morphing-dialog';
+import { DialogShell } from '@/components/common/DialogShell';
+import { toast } from '@/components/common/Toast';
 import { Tabs, TabsContents, TabsContent } from '@/components/animate-ui/primitives/animate/tabs';
 import { type StatsMetricsFormatted } from '@/api/endpoints/stats';
 import { useTranslations } from 'use-intl';
@@ -141,7 +138,10 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
             onSuccess: () => {
                 setIsEditing(false);
                 setIsOpen(false);
-            }
+            },
+            onError: (error) => {
+                toast.error(error.message);
+            },
         });
     };
 
@@ -151,35 +151,22 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
             return;
         }
 
-        setIsOpen(false);
-        setTimeout(() => {
-            deleteChannel.mutate(channel.id);
-        }, 300);
+        deleteChannel.mutate(channel.id, {
+            onSuccess: () => setIsOpen(false),
+            onError: (error) => toast.error(error.message),
+        });
     };
 
     return (
-        <>
-            <MorphingDialogTitle>
-                <header className="mb-6 flex items-center justify-between">
-                    <h2 className="text-2xl font-bold text-card-foreground">
-                        {isEditing ? t('title.edit') : t('title.view')}
-                    </h2>
-                    <MorphingDialogClose
-                        className="relative top-0 right-0"
-                        variants={{
-                            initial: { opacity: 0, scale: 0.8 },
-                            animate: { opacity: 1, scale: 1 },
-                            exit: { opacity: 0, scale: 0.8 }
-                        }}
-                    />
-                </header>
-            </MorphingDialogTitle>
-
-            <MorphingDialogDescription>
+        <DialogShell
+            title={isEditing ? t('title.edit') : t('title.view')}
+            size="md"
+            scroll="body"
+        >
                 <Tabs value={currentView}>
                     <TabsContents>
                         <TabsContent value="viewing" >
-                            <div className="max-h-[60vh] overflow-y-auto space-y-4 sm:space-y-5">
+                            <div className="space-y-4 sm:space-y-5">
                                 <dl className="grid gap-3 grid-cols-1 sm:grid-cols-3">
                                     <div className="rounded-2xl border bg-linear-to-br from-chart-1/10 to-chart-1/5 p-3 sm:p-4">
                                         <dt className="flex items-center gap-2 mb-2 text-xs font-medium text-muted-foreground">
@@ -456,7 +443,6 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                         </TabsContent>
                     </TabsContents>
                 </Tabs>
-            </MorphingDialogDescription>
-        </>
+        </DialogShell>
     );
 }

@@ -158,8 +158,15 @@ html.dark,
 @layer base {
   * {
     @apply border-border outline-ring/50;
+  }
+
+  .scrollbar-none {
     scrollbar-width: none;
     -ms-overflow-style: none;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
 
   body {

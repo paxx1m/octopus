@@ -11,18 +11,22 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/animate-ui
 import type { SelectedMember } from './ItemList';
 import { MemberList } from './ItemList';
 import { GroupEditor, type GroupEditorValues } from './Editor';
-import { buildChannelNameByModelKey, modelChannelKey, MODE_LABELS } from './utils';
-import { GroupMode, type GroupUpdateRequest } from '@/api/endpoints/group';
+import {
+    buildChannelNameByModelKey,
+    buildGroupUpdatePayload,
+    buildItemsUpdatePayload,
+    modelChannelKey,
+    MODE_LABELS,
+} from './utils';
+import { GroupMode } from '@/api/endpoints/group';
 import {
     MorphingDialog,
-    MorphingDialogClose,
     MorphingDialogContainer,
     MorphingDialogContent,
-    MorphingDialogDescription,
-    MorphingDialogTitle,
     MorphingDialogTrigger,
     useMorphingDialog,
 } from '@/components/ui/morphing-dialog';
+import { DialogShell } from '@/components/common/DialogShell';
 
 interface EditDialogContentProps {
     group: Group;
@@ -35,34 +39,24 @@ function EditDialogContent({ group, displayMembers, isSubmitting, onSubmit }: Ed
     const { setIsOpen } = useMorphingDialog();
     const t = useTranslations('group');
     return (
-        <>
-            <MorphingDialogTitle className="shrink-0">
-                <header className="mb-3 flex items-center justify-between">
-                    <h2 className="text-2xl font-bold text-card-foreground">
-                        {t('detail.actions.edit')}
-                    </h2>
-                    <MorphingDialogClose className="relative right-0 top-0" />
-                </header>
-            </MorphingDialogTitle>
-            <MorphingDialogDescription className="flex-1 min-h-0 overflow-hidden">
-                <GroupEditor
-                    key={`edit-group-${group.id}`}
-                    initial={{
-                        name: group.name,
-                        match_regex: group.match_regex ?? '',
-                        mode: group.mode,
-                        first_token_time_out: group.first_token_time_out ?? 0,
-                        session_keep_time: group.session_keep_time ?? 0,
-                        members: displayMembers,
-                    }}
-                    submitText={t('detail.actions.save')}
-                    submittingText={t('create.submitting')}
-                    isSubmitting={isSubmitting}
-                    onCancel={() => setIsOpen(false)}
-                    onSubmit={(v) => onSubmit(v, () => setIsOpen(false))}
-                />
-            </MorphingDialogDescription>
-        </>
+        <DialogShell title={t('detail.actions.edit')} size="lg" scroll="none">
+            <GroupEditor
+                key={`edit-group-${group.id}`}
+                initial={{
+                    name: group.name,
+                    match_regex: group.match_regex ?? '',
+                    mode: group.mode,
+                    first_token_time_out: group.first_token_time_out ?? 0,
+                    session_keep_time: group.session_keep_time ?? 0,
+                    members: displayMembers,
+                }}
+                submitText={t('detail.actions.save')}
+                submittingText={t('create.submitting')}
+                isSubmitting={isSubmitting}
+                onCancel={() => setIsOpen(false)}
+                onSubmit={(v) => onSubmit(v, () => setIsOpen(false))}
+            />
+        </DialogShell>
     );
 }
 
@@ -137,15 +131,9 @@ export function GroupCard({ group }: { group: Group }) {
     const handleDragFinish = useCallback(() => { isDragging.current = false; }, []);
 
     const handleDropReorder = useCallback((nextMembers: SelectedMember[]) => {
-        const itemsToUpdate = nextMembers
-            .map((m, i) => ({ member: m, newPriority: i + 1 }))
-            .filter(({ member, newPriority }) => {
-                if (!member.item_id) return false;
-                const origPriority = priorityByItemId.get(member.item_id);
-                return origPriority !== undefined && origPriority !== newPriority;
-            })
-            .map(({ member, newPriority }) => ({ id: member.item_id!, priority: newPriority, weight: member.weight ?? 1 }));
-        if (itemsToUpdate.length > 0) updateGroup.mutate({ id: group.id!, items_to_update: itemsToUpdate }, { onSuccess, onError });
+        if (!group.id) return;
+        const payload = buildItemsUpdatePayload(group.id, nextMembers, priorityByItemId);
+        if (payload) updateGroup.mutate(payload, { onSuccess, onError });
     }, [group.id, priorityByItemId, updateGroup, onSuccess, onError]);
 
     const handleRemoveMember = useCallback((id: string) => {
@@ -169,62 +157,8 @@ export function GroupCard({ group }: { group: Group }) {
     }, [group.id, priorityByItemId, updateGroup, onSuccess, onError]);
 
     const handleSubmitEdit = useCallback((values: GroupEditorValues, onDone?: () => void) => {
-        if (!group.id) return;
-
-        const originalItems = [...(group.items || [])].sort((a, b) => a.priority - b.priority);
-        const originalById = new Map<number, { priority: number; weight: number }>();
-        const originalIds = new Set<number>();
-        originalItems.forEach((it) => {
-            if (typeof it.id === 'number') {
-                originalIds.add(it.id);
-                originalById.set(it.id, { priority: it.priority, weight: it.weight });
-            }
-        });
-
-        const newIds = new Set<number>();
-        values.members.forEach((m) => { if (typeof m.item_id === 'number') newIds.add(m.item_id); });
-
-        const items_to_delete = Array.from(originalIds).filter((id) => !newIds.has(id));
-
-        const items_to_add = values.members
-            .map((m, idx) => ({ m, priority: idx + 1 }))
-            .filter(({ m }) => typeof m.item_id !== 'number')
-            .map(({ m, priority }) => ({
-                channel_id: m.channel_id,
-                model_name: m.name,
-                priority,
-                weight: m.weight ?? 1,
-            }));
-
-        const items_to_update = values.members
-            .map((m, idx) => ({ m, priority: idx + 1 }))
-            .filter(({ m }) => typeof m.item_id === 'number')
-            .map(({ m, priority }) => {
-                const id = m.item_id!;
-                const orig = originalById.get(id);
-                const weight = m.weight ?? 1;
-                if (!orig) return null;
-                if (orig.priority === priority && orig.weight === weight) return null;
-                return { id, priority, weight };
-            })
-            .filter((x): x is { id: number; priority: number; weight: number } => x !== null);
-
-        const payload: GroupUpdateRequest = { id: group.id };
-        const nextName = values.name.trim();
-        const nextRegex = (values.match_regex ?? '').trim();
-        const nextFirstTokenTimeOut = values.first_token_time_out ?? 0;
-        const nextSessionKeepTime = values.session_keep_time ?? 0;
-
-        if (nextName && nextName !== group.name) payload.name = nextName;
-        if (values.mode !== group.mode) payload.mode = values.mode;
-        if (nextRegex !== (group.match_regex ?? '')) payload.match_regex = nextRegex;
-        if (nextFirstTokenTimeOut !== (group.first_token_time_out ?? 0)) payload.first_token_time_out = nextFirstTokenTimeOut;
-        if (nextSessionKeepTime !== (group.session_keep_time ?? 0)) payload.session_keep_time = nextSessionKeepTime;
-        if (items_to_add.length) payload.items_to_add = items_to_add;
-        if (items_to_update.length) payload.items_to_update = items_to_update;
-        if (items_to_delete.length) payload.items_to_delete = items_to_delete;
-
-        if (Object.keys(payload).length === 1) {
+        const payload = buildGroupUpdatePayload(group, values);
+        if (!payload) {
             onDone?.();
             return;
         }
@@ -236,7 +170,7 @@ export function GroupCard({ group }: { group: Group }) {
             },
             onError,
         });
-    }, [group.first_token_time_out, group.session_keep_time, group.id, group.items, group.match_regex, group.mode, group.name, onSuccess, onError, updateGroup]);
+    }, [group, onSuccess, onError, updateGroup]);
 
     return (
         <article className="flex flex-col rounded-3xl border border-border bg-card text-card-foreground p-4 custom-shadow">
@@ -262,7 +196,7 @@ export function GroupCard({ group }: { group: Group }) {
                         </MorphingDialogTrigger>
 
                         <MorphingDialogContainer>
-                            <MorphingDialogContent className="relative w-screen max-w-full md:max-w-4xl bg-card text-card-foreground px-6 py-4 rounded-3xl h-[calc(100vh-2rem)] flex flex-col overflow-hidden">
+                            <MorphingDialogContent className="h-[min(90dvh,calc(100dvh-2rem))] w-[min(56rem,calc(100vw-2rem))] rounded-3xl bg-card px-4 py-4 text-card-foreground sm:px-6">
                                 <EditDialogContent
                                     group={group}
                                     displayMembers={displayMembers}

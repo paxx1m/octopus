@@ -410,7 +410,8 @@
             "updated": "Model price updated",
             "updateFailed": "Update failed",
             "deleted": "Model deleted",
-            "deleteFailed": "Delete failed"
+            "deleteFailed": "Delete failed",
+            "createFailed": "Failed to create model"
         },
         "card": {
             "inputCache": "Input/Cache",
@@ -501,7 +502,8 @@
         "create": {
             "dialogTitle": "Create New Channel",
             "submit": "Create Channel",
-            "submitting": "Creating..."
+            "submitting": "Creating...",
+            "createFailed": "Failed to create channel"
         },
         "form": {
             "add": "Add",

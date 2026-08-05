@@ -76,9 +76,7 @@ export type MorphingDialogProps = {
 
 function MorphingDialog({ children, transition }: MorphingDialogProps) {
   return (
-    <MorphingDialogProvider>
-      <MotionConfig transition={transition}>{children}</MotionConfig>
-    </MorphingDialogProvider>
+    <MorphingDialogProvider transition={transition}>{children}</MorphingDialogProvider>
   );
 }
 
@@ -154,6 +152,9 @@ export type MorphingDialogContentProps = {
   style?: React.CSSProperties;
 };
 
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 function MorphingDialogContent({
   children,
   className,
@@ -164,12 +165,26 @@ function MorphingDialogContent({
   const firstFocusableElementRef = useRef<HTMLElement | null>(null);
   const lastFocusableElementRef = useRef<HTMLElement | null>(null);
 
+  const refreshFocusable = useCallback(() => {
+    const focusableElements = containerRef.current?.querySelectorAll(FOCUSABLE_SELECTOR);
+    if (focusableElements && focusableElements.length > 0) {
+      firstFocusableElementRef.current = focusableElements[0] as HTMLElement;
+      lastFocusableElementRef.current =
+        focusableElements[focusableElements.length - 1] as HTMLElement;
+      return focusableElements[0] as HTMLElement;
+    }
+    firstFocusableElementRef.current = null;
+    lastFocusableElementRef.current = null;
+    return null;
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setIsOpen(false);
       }
       if (event.key === 'Tab') {
+        refreshFocusable();
         if (!firstFocusableElementRef.current || !lastFocusableElementRef.current) return;
 
         if (event.shiftKey) {
@@ -191,24 +206,31 @@ function MorphingDialogContent({
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [setIsOpen]);
+  }, [setIsOpen, refreshFocusable]);
 
   useEffect(() => {
     if (isOpen) {
       document.body.classList.add('overflow-hidden');
-      const focusableElements = containerRef.current?.querySelectorAll(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-      if (focusableElements && focusableElements.length > 0) {
-        firstFocusableElementRef.current = focusableElements[0] as HTMLElement;
-        lastFocusableElementRef.current = focusableElements[focusableElements.length - 1] as HTMLElement;
-        (focusableElements[0] as HTMLElement).focus();
-      }
+      const first = refreshFocusable();
+      first?.focus();
     } else {
       document.body.classList.remove('overflow-hidden');
       triggerRef.current?.focus();
     }
-  }, [isOpen, triggerRef]);
+
+    return () => {
+      document.body.classList.remove('overflow-hidden');
+    };
+  }, [isOpen, triggerRef, refreshFocusable]);
+
+  useEffect(() => {
+    if (!isOpen || !containerRef.current) return;
+    const observer = new MutationObserver(() => {
+      refreshFocusable();
+    });
+    observer.observe(containerRef.current, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [isOpen, refreshFocusable]);
 
   useClickOutside(
     containerRef,
@@ -241,7 +263,10 @@ function MorphingDialogContent({
     <motion.div
       ref={containerRef}
       layoutId={`dialog-${uniqueId}`}
-      className={cn('overflow-hidden', className)}
+      className={cn(
+        'relative flex min-h-0 max-h-[min(90dvh,calc(100dvh-2rem))] flex-col overflow-hidden',
+        className
+      )}
       style={style}
       role='dialog'
       aria-modal='true'

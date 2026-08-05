@@ -410,7 +410,8 @@
             "updated": "模型價格已更新",
             "updateFailed": "更新失敗",
             "deleted": "模型已刪除",
-            "deleteFailed": "刪除失敗"
+            "deleteFailed": "刪除失敗",
+            "createFailed": "建立模型失敗"
         },
         "card": {
             "inputCache": "輸入/快取",
@@ -501,7 +502,8 @@
         "create": {
             "dialogTitle": "建立新供應源",
             "submit": "建立供應源",
-            "submitting": "建立中..."
+            "submitting": "建立中...",
+            "createFailed": "建立供應源失敗"
         },
         "form": {
             "add": "新增",

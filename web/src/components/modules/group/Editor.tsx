@@ -74,8 +74,8 @@ function ModelPickerSection({
     }, [channels, normalizedSearch]);
 
     return (
-        <div className="rounded-xl border border-border/50 bg-muted/30 flex flex-col min-h-0">
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-2 border-b border-border/30 bg-muted/50">
+        <div className="flex min-h-[14rem] flex-col rounded-xl border border-border/50 bg-muted/30 md:min-h-0">
+            <div className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-border/30 bg-muted/50 px-3 py-2">
                 <span className="min-w-0 justify-self-start text-sm font-medium text-foreground">
                     {t('form.addItem')}
                 </span>
@@ -190,12 +190,12 @@ function SortSection({
     const t = useTranslations('group');
 
     return (
-        <div className="rounded-xl border border-border/50 bg-muted/30 flex flex-col min-h-0">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-border/30 bg-muted/50">
+        <div className="flex min-h-[14rem] flex-col rounded-xl border border-border/50 bg-muted/30 md:min-h-0">
+            <div className="flex shrink-0 items-center justify-between border-b border-border/30 bg-muted/50 px-3 py-2">
                 <span className="text-sm font-medium text-foreground">
                     {t('form.items')}
                     {members.length > 0 && (
-                        <span className="ml-1.5 text-xs text-muted-foreground font-normal">
+                        <span className="ml-1.5 text-xs font-normal text-muted-foreground">
                             ({members.length})
                         </span>
                     )}
@@ -345,9 +345,9 @@ export function GroupEditor({
 
     return (
         <form onSubmit={handleSubmit} className="flex flex-col h-full min-h-0 ">
-            <div className="flex-1 min-h-0 overflow-hidden pr-1">
-                <FieldGroup className="gap-4 flex flex-col min-h-0 h-full">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 md:overflow-hidden">
+                <FieldGroup className="flex h-full min-h-0 flex-col gap-4">
+                    <div className="grid shrink-0 grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
                         <Field>
                             <FieldLabel htmlFor="group-name">{t('form.name')}</FieldLabel>
                             <Input
@@ -443,7 +443,7 @@ export function GroupEditor({
                     </div>
 
                     {/* Mode */}
-                    <div className="flex gap-1">
+                    <div className="flex shrink-0 gap-1">
                         {([1, 2, 3, 4] as const).map((m) => (
                             <button
                                 key={m}
@@ -459,8 +459,8 @@ export function GroupEditor({
                         ))}
                     </div>
 
-                    <div className="flex-1 min-h-0">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full min-h-0">
+                    <div className="min-h-[16rem] flex-1 md:min-h-0">
+                        <div className="grid h-full min-h-0 grid-cols-1 gap-4 md:grid-cols-2">
                             <ModelPickerSection
                                 modelChannels={modelChannels}
                                 selectedMembers={selectedMembers}
