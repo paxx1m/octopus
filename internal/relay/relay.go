@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/helper"
@@ -135,9 +136,10 @@ func (r *relayRun) run() {
 //  4. ≥2 可用 Key：按 KeyMode 选择并在同渠道内故障转移，耗尽后再换渠道
 //
 // 429 冷却恢复说明：
-//  Key 被 429 后不会从列表物理删除，只是 IsAvailable 在冷却期内返回 false。
-//  冷却结束后（now - LastUseTimeStamp >= cooldown），下次 ListAvailable/Select
-//  会自动再次选中该 Key，无需后台任务“补回列表”。
+//
+//	Key 被 429 后不会从列表物理删除，只是 IsAvailable 在冷却期内返回 false。
+//	冷却结束后（now - LastUseTimeStamp >= cooldown），下次 ListAvailable/Select
+//	会自动再次选中该 Key，无需后台任务“补回列表”。
 func (r *relayRun) tryChannel() (ok, written bool, err error) {
 	item := r.iter.Item()
 	channel, err := op.ChannelGet(item.ChannelID, r.c.Request.Context())
@@ -197,6 +199,11 @@ func (r *relayRun) tryChannel() (ok, written bool, err error) {
 		// 多 Key：在同渠道内按策略选择并故障转移，直到无可用 Key。
 		var lastErr error
 		for {
+			// 请求端已断开/取消（如客户端超时）：不再浪费性重试剩余 Key，
+			// 直接以 context.Canceled 结束，避免把客户端取消记成渠道/Key 失败。
+			if r.c.Request.Context().Err() != nil {
+				return false, false, context.Canceled
+			}
 			// 每次循环重新取缓存快照，使上一 Key 的 429/禁用状态对本循环可见。
 			if refreshed, getErr := op.ChannelGet(channel.ID, r.c.Request.Context()); getErr == nil {
 				channel = refreshed
@@ -345,6 +352,28 @@ func (ra *relayAttempt) forward() (int, error) {
 	relayMiddleware := &relayPipelineMiddleware{attempt: ra}
 	// 每次 attempt 新建 pipeline：出站适配器/渠道参数不同，且请求体可能被 ParamOverride 修改，
 	// 复用同一 pipeline 实例跨渠道不安全。Factory 本身很轻，主要成本在上游 RTT。
+	isStream := ra.internalRequest.Stream != nil && *ra.internalRequest.Stream
+
+	// 首字超时：仅流式请求启用。计时起点前移到“发出请求之前”，覆盖
+	// “等待上游响应头（TTFB）”+“收到响应头后等首个 token”两个阶段；
+	// 收到首个有效 token 即停止。到点 cancel() 取消请求上下文，中断上游请求，
+	// 再由上层循环故障转移切到下一个渠道。若不前移，上游在返回响应头前
+	// 长时间思考/排队时，计时器（原在 writeStream 内）根本不会创建，超时不触发。
+	firstTokenTimeoutSec := ra.group.FirstTokenTimeOut
+	reqCtx := ctx
+	var firstTokenTimer *time.Timer
+	var firstTokenTimedOut atomic.Bool
+	if isStream && firstTokenTimeoutSec > 0 {
+		var cancel context.CancelFunc
+		reqCtx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		firstTokenTimer = time.AfterFunc(time.Duration(firstTokenTimeoutSec)*time.Second, func() {
+			firstTokenTimedOut.Store(true)
+			cancel()
+		})
+		defer firstTokenTimer.Stop()
+	}
+
 	result, err := pipeline.NewFactory(httpclient.NewHttpClientWithClient(httpClient)).
 		Pipeline(
 			&parsedRequestInbound{Inbound: ra.inAdapter, request: ra.internalRequest},
@@ -352,15 +381,21 @@ func (ra *relayAttempt) forward() (int, error) {
 			pipeline.WithMiddlewares(stream.EnsureUsage(), relayMiddleware),
 			pipeline.WithEmptyResponseDetection(),
 		).
-		Process(ctx, ra.internalRequest.RawRequest)
+		Process(reqCtx, ra.internalRequest.RawRequest)
 	if err != nil {
+		// 首字超时通过取消请求上下文体现为 context canceled；这里转成明确的
+		// first token timeout 错误，触发故障转移，而不是把渠道记成上游失败。
+		if firstTokenTimedOut.Load() {
+			log.Warnf("first token timeout (%ds) while waiting for response headers, switching channel", firstTokenTimeoutSec)
+			return relayMiddleware.upstreamStatusCode, fmt.Errorf("first token timeout (%ds)", firstTokenTimeoutSec)
+		}
 		return relayMiddleware.upstreamStatusCode, err
 	}
 	if result == nil {
 		return 0, fmt.Errorf("empty pipeline result")
 	}
 	if result.Stream {
-		if err := ra.writeStream(ctx, result.EventStream); err != nil {
+		if err := ra.writeStream(reqCtx, result.EventStream, firstTokenTimer, &firstTokenTimedOut); err != nil {
 			// 已向客户端写出 SSE 后不可再换渠道；状态仍按 200 记录（部分成功语义）。
 			// 尚未写出时返回 502，避免 OnResult 把失败当成功。
 			if ra.c.Writer.Written() {
@@ -436,7 +471,7 @@ const streamEventBufferMax = 4096
 //  3. 客户端断开返回 error（不是 nil），避免外层记成成功并错误累加费用。
 //  4. 首 token 超时返回 error 且 Written()=false，外层可换渠道/Key。
 //  5. responseEvents 只服务日志聚合，有上限，避免超长流 OOM。
-func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.Stream[*httpclient.StreamEvent]) error {
+func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.Stream[*httpclient.StreamEvent], firstTokenTimer *time.Timer, firstTokenTimedOut *atomic.Bool) error {
 	if clientStream == nil {
 		return fmt.Errorf("empty pipeline stream")
 	}
@@ -492,32 +527,18 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 	}()
 
 	firstTokenTimeoutSec := ra.group.FirstTokenTimeOut
-	var firstTokenTimer *time.Timer
-	var firstTokenC <-chan time.Time
-	if firstTokenTimeoutSec > 0 {
-		firstTokenTimer = time.NewTimer(time.Duration(firstTokenTimeoutSec) * time.Second)
-		firstTokenC = firstTokenTimer.C
-		defer func() {
-			if firstTokenTimer != nil {
-				firstTokenTimer.Stop()
-			}
-		}()
-	}
 
 	for {
 		select {
 		case <-ctx.Done():
+			// 先判首字超时再当客户端断开：首字超时也是通过取消 reqCtx 触发 ctx.Done()。
+			if firstTokenTimedOut.Load() {
+				log.Warnf("first token timeout (%ds) while reading stream, switching channel", firstTokenTimeoutSec)
+				return fmt.Errorf("first token timeout (%ds)", firstTokenTimeoutSec)
+			}
 			// 客户端断开：返回 error，由 run()/Save 记失败；stream Close 交给 reader defer。
 			log.Infof("client disconnected, stopping stream")
-			if ra.c.Writer.Written() {
-				// 已写出部分内容，无法换渠道，但仍应记失败避免费用/成功计数虚高。
-				return context.Canceled
-			}
 			return context.Canceled
-		case <-firstTokenC:
-			// 尚未写出首 token 时可换渠道；Close 由 reader 在 done 关闭后执行。
-			log.Warnf("first token timeout (%ds), switching channel", firstTokenTimeoutSec)
-			return fmt.Errorf("first token timeout (%ds)", firstTokenTimeoutSec)
 		case r, ok := <-results:
 			if !ok {
 				log.Infof("stream end")
@@ -538,6 +559,14 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 				return nil
 			}
 			if r.err != nil {
+				// 首字超时通过取消请求上下文中断读取，这里把它转成明确的超时错误。
+				if firstTokenTimedOut.Load() {
+					return fmt.Errorf("first token timeout (%ds)", firstTokenTimeoutSec)
+				}
+				// 客户端断开：只停止，不触发故障转移（外层按 context.Canceled 记失败）。
+				if ctx.Err() != nil {
+					return context.Canceled
+				}
 				log.Warnf("failed to read event: %v", r.err)
 				return fmt.Errorf("failed to read stream event: %w", r.err)
 			}
@@ -554,15 +583,9 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 			if firstToken {
 				ra.metrics.FirstTokenTime = time.Now()
 				firstToken = false
+				// 收到首个有效 token，停止首字计时；余下流不再受其约束。
 				if firstTokenTimer != nil {
-					if !firstTokenTimer.Stop() {
-						select {
-						case <-firstTokenTimer.C:
-						default:
-						}
-					}
-					firstTokenTimer = nil
-					firstTokenC = nil
+					firstTokenTimer.Stop()
 				}
 			}
 
