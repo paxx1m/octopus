@@ -131,32 +131,28 @@
                 "last30Days": "30 Days"
             }
         },
-        "rank": {
-            "title": "Ranking",
-            "sortByCost": "Cost",
-            "sortByCount": "Count",
-            "sortByTokens": "Tokens",
-            "noData": "No ranking data",
-            "successRate": "Success Rate"
-        },
-        "channelPerf": {
-            "title": "Channel Performance",
+        "channelRanking": {
+            "title": "Channel Ranking",
             "noData": "No channel data",
             "enabled": "Enabled",
             "disabled": "Disabled",
-            "hint": "Success rate and average latency are derived from cumulative channel stats. Tokens/s uses total tokens ÷ total wait time (includes failures and queue time).",
+            "hint": "Top 3 show medals. Success rate and avg latency are derived from cumulative stats; Tokens/s = total tokens ÷ total wait time (includes failures).",
             "columns": {
                 "channel": "Channel",
                 "requests": "Requests",
                 "successRate": "Success",
                 "avgLatency": "Avg Latency",
-                "tokensPerSec": "Tokens/s"
+                "tokensPerSec": "Tokens/s",
+                "cost": "Cost",
+                "tokens": "Tokens"
             },
             "sort": {
                 "requests": "Requests",
                 "successRate": "Success",
                 "avgLatency": "Latency",
-                "tokensPerSec": "Tokens/s"
+                "tokensPerSec": "Tokens/s",
+                "cost": "Cost",
+                "tokens": "Tokens"
             }
         }
     },

@@ -131,32 +131,28 @@
                 "last30Days": "30天"
             }
         },
-        "rank": {
-            "title": "排行榜",
-            "sortByCost": "金額",
-            "sortByCount": "次數",
-            "sortByTokens": "Tokens",
-            "noData": "暫無排行數據",
-            "successRate": "成功率"
-        },
-        "channelPerf": {
-            "title": "供應源性能總覽",
+        "channelRanking": {
+            "title": "供應源排行",
             "noData": "暫無供應源數據",
             "enabled": "已啟用",
             "disabled": "已停用",
-            "hint": "成功率與平均延遲由供應源累計統計推導。Tokens/s = 總 Token ÷ 累計等待時間（含失敗與排隊）。",
+            "hint": "前三名顯示獎牌。成功率與平均延遲由累計統計推導；Tokens/s = 總 Token ÷ 累計等待時間（含失敗）。",
             "columns": {
                 "channel": "供應源",
                 "requests": "請求數",
                 "successRate": "成功率",
                 "avgLatency": "平均延遲",
-                "tokensPerSec": "Tokens/s"
+                "tokensPerSec": "Tokens/s",
+                "cost": "費用",
+                "tokens": "Tokens"
             },
             "sort": {
                 "requests": "請求數",
                 "successRate": "成功率",
                 "avgLatency": "延遲",
-                "tokensPerSec": "Tokens/s"
+                "tokensPerSec": "Tokens/s",
+                "cost": "費用",
+                "tokens": "Tokens"
             }
         }
     },
