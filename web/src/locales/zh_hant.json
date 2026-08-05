@@ -138,6 +138,26 @@
             "sortByTokens": "Tokens",
             "noData": "暫無排行數據",
             "successRate": "成功率"
+        },
+        "channelPerf": {
+            "title": "供應源性能總覽",
+            "noData": "暫無供應源數據",
+            "enabled": "已啟用",
+            "disabled": "已停用",
+            "hint": "成功率與平均延遲由供應源累計統計推導。Tokens/s = 總 Token ÷ 累計等待時間（含失敗與排隊）。",
+            "columns": {
+                "channel": "供應源",
+                "requests": "請求數",
+                "successRate": "成功率",
+                "avgLatency": "平均延遲",
+                "tokensPerSec": "Tokens/s"
+            },
+            "sort": {
+                "requests": "請求數",
+                "successRate": "成功率",
+                "avgLatency": "延遲",
+                "tokensPerSec": "Tokens/s"
+            }
         }
     },
     "setting": {
@@ -439,6 +459,7 @@
             "errorInfo": "錯誤訊息",
             "firstToken": "首字",
             "totalTime": "總耗時",
+            "tokensPerSec": "速度",
             "input": "輸入",
             "output": "輸出",
             "cost": "費用",

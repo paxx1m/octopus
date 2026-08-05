@@ -138,6 +138,26 @@
             "sortByTokens": "Tokens",
             "noData": "No ranking data",
             "successRate": "Success Rate"
+        },
+        "channelPerf": {
+            "title": "Channel Performance",
+            "noData": "No channel data",
+            "enabled": "Enabled",
+            "disabled": "Disabled",
+            "hint": "Success rate and average latency are derived from cumulative channel stats. Tokens/s uses total tokens ÷ total wait time (includes failures and queue time).",
+            "columns": {
+                "channel": "Channel",
+                "requests": "Requests",
+                "successRate": "Success",
+                "avgLatency": "Avg Latency",
+                "tokensPerSec": "Tokens/s"
+            },
+            "sort": {
+                "requests": "Requests",
+                "successRate": "Success",
+                "avgLatency": "Latency",
+                "tokensPerSec": "Tokens/s"
+            }
         }
     },
     "setting": {
@@ -439,6 +459,7 @@
             "errorInfo": "Error Info",
             "firstToken": "TTFT",
             "totalTime": "Total",
+            "tokensPerSec": "Speed",
             "input": "Input",
             "output": "Output",
             "cost": "Cost",

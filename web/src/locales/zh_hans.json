@@ -138,6 +138,26 @@
             "sortByTokens": "Tokens",
             "noData": "暂无排行数据",
             "successRate": "成功率"
+        },
+        "channelPerf": {
+            "title": "渠道性能总览",
+            "noData": "暂无渠道数据",
+            "enabled": "已启用",
+            "disabled": "已禁用",
+            "hint": "成功率与平均延迟由渠道累计统计推导。Tokens/s = 总 Token ÷ 累计等待时间（含失败与排队）。",
+            "columns": {
+                "channel": "渠道",
+                "requests": "请求数",
+                "successRate": "成功率",
+                "avgLatency": "平均延迟",
+                "tokensPerSec": "Tokens/s"
+            },
+            "sort": {
+                "requests": "请求数",
+                "successRate": "成功率",
+                "avgLatency": "延迟",
+                "tokensPerSec": "Tokens/s"
+            }
         }
     },
     "setting": {
@@ -439,6 +459,7 @@
             "errorInfo": "错误信息",
             "firstToken": "首字",
             "totalTime": "总耗时",
+            "tokensPerSec": "速度",
             "input": "输入",
             "output": "输出",
             "cost": "费用",

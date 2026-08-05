@@ -1,6 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../client';
 import { formatCount, formatMoney, formatTime } from '@/lib/utils';
+import {
+    avgLatencyMs,
+    formatAvgLatency,
+    formatSuccessRate,
+    formatTokensPerSec,
+    successRatePercent,
+    tokensPerSecond,
+} from '@/lib/metrics';
 
 /**
  * 统计数据
@@ -15,7 +23,19 @@ interface StatsMetrics {
     request_failed: number;
 }
 
-export interface StatsMetricsFormatted {
+export interface StatsDerivedMetrics {
+    /** 0–100 */
+    success_rate: number;
+    success_rate_label: string;
+    /** average wait/latency ms */
+    avg_latency_ms: number;
+    avg_latency_label: string;
+    /** tokens per second from cumulative totals */
+    tokens_per_sec: number;
+    tokens_per_sec_label: string;
+}
+
+export interface StatsMetricsFormatted extends StatsDerivedMetrics {
     input_token: ReturnType<typeof formatCount>;
     output_token: ReturnType<typeof formatCount>;
     input_cost: ReturnType<typeof formatMoney>;
@@ -27,6 +47,41 @@ export interface StatsMetricsFormatted {
     request_count: ReturnType<typeof formatCount>;
     total_token: ReturnType<typeof formatCount>;
     total_cost: ReturnType<typeof formatMoney>;
+}
+
+/** Derive rates from raw cumulative StatsMetrics (shared by all formatters). */
+export function deriveStatsMetrics(item: StatsMetrics): StatsDerivedMetrics {
+    const success = item.request_success ?? 0;
+    const failed = item.request_failed ?? 0;
+    const wait = item.wait_time ?? 0;
+    const tokens = (item.input_token ?? 0) + (item.output_token ?? 0);
+    const rate = successRatePercent(success, failed);
+    const avgMs = avgLatencyMs(wait, success, failed);
+    const tps = tokensPerSecond(tokens, wait);
+    return {
+        success_rate: rate,
+        success_rate_label: formatSuccessRate(rate),
+        avg_latency_ms: avgMs,
+        avg_latency_label: formatAvgLatency(avgMs),
+        tokens_per_sec: tps,
+        tokens_per_sec_label: formatTokensPerSec(tps),
+    };
+}
+
+export function formatStatsMetrics(item: StatsMetrics): StatsMetricsFormatted {
+    return {
+        input_token: formatCount(item.input_token),
+        output_token: formatCount(item.output_token),
+        total_token: formatCount((item.input_token ?? 0) + (item.output_token ?? 0)),
+        input_cost: formatMoney(item.input_cost),
+        output_cost: formatMoney(item.output_cost),
+        total_cost: formatMoney((item.input_cost ?? 0) + (item.output_cost ?? 0)),
+        wait_time: formatTime(item.wait_time),
+        request_success: formatCount(item.request_success),
+        request_failed: formatCount(item.request_failed),
+        request_count: formatCount((item.request_success ?? 0) + (item.request_failed ?? 0)),
+        ...deriveStatsMetrics(item),
+    };
 }
 
 export interface StatsChannel extends StatsMetrics {
@@ -87,16 +142,7 @@ export function useStatsDaily() {
             return apiClient.get<StatsDaily[]>('/api/v1/stats/daily');
         },
         select: (data) => data.map((item): StatsDailyFormatted => ({
-            input_token: formatCount(item.input_token),
-            output_token: formatCount(item.output_token),
-            total_token: formatCount(item.input_token + item.output_token),
-            input_cost: formatMoney(item.input_cost),
-            output_cost: formatMoney(item.output_cost),
-            total_cost: formatMoney(item.input_cost + item.output_cost),
-            wait_time: formatTime(item.wait_time),
-            request_success: formatCount(item.request_success),
-            request_failed: formatCount(item.request_failed),
-            request_count: formatCount(item.request_success + item.request_failed),
+            ...formatStatsMetrics(item),
             date: item.date,
         })),
         refetchInterval: 3600000, // 1 小时
@@ -113,18 +159,9 @@ export function useStatsHourly() {
             return apiClient.get<StatsHourly[]>('/api/v1/stats/hourly');
         },
         select: (data) => data.map((item): StatsHourlyFormatted => ({
+            ...formatStatsMetrics(item),
             hour: item.hour,
             date: item.date,
-            input_token: formatCount(item.input_token),
-            output_token: formatCount(item.output_token),
-            total_token: formatCount(item.input_token + item.output_token),
-            input_cost: formatMoney(item.input_cost),
-            output_cost: formatMoney(item.output_cost),
-            total_cost: formatMoney(item.input_cost + item.output_cost),
-            wait_time: formatTime(item.wait_time),
-            request_success: formatCount(item.request_success),
-            request_failed: formatCount(item.request_failed),
-            request_count: formatCount(item.request_success + item.request_failed),
         })),
         refetchInterval: 10000,// 10 秒
         refetchOnMount: 'always',
@@ -137,18 +174,7 @@ export function useStatsTotal() {
         queryFn: async () => {
             return apiClient.get<StatsTotal>('/api/v1/stats/total');
         },
-        select: (data) => ({
-            input_token: formatCount(data.input_token),
-            output_token: formatCount(data.output_token),
-            total_token: formatCount(data.input_token + data.output_token),
-            input_cost: formatMoney(data.input_cost),
-            output_cost: formatMoney(data.output_cost),
-            total_cost: formatMoney(data.input_cost + data.output_cost),
-            wait_time: formatTime(data.wait_time),
-            request_success: formatCount(data.request_success),
-            request_failed: formatCount(data.request_failed),
-            request_count: formatCount(data.request_success + data.request_failed),
-        }),
+        select: (data) => formatStatsMetrics(data),
         refetchInterval: 10000,// 10 秒
         refetchOnMount: 'always',
     });
@@ -166,17 +192,8 @@ export function useStatsAPIKey() {
             return apiClient.get<StatsAPIKey[]>('/api/v1/stats/apikey');
         },
         select: (data) => data.map((item): StatsAPIKeyFormatted => ({
+            ...formatStatsMetrics(item),
             api_key_id: item.api_key_id,
-            input_token: formatCount(item.input_token),
-            output_token: formatCount(item.output_token),
-            total_token: formatCount(item.input_token + item.output_token),
-            input_cost: formatMoney(item.input_cost),
-            output_cost: formatMoney(item.output_cost),
-            total_cost: formatMoney(item.input_cost + item.output_cost),
-            wait_time: formatTime(item.wait_time),
-            request_success: formatCount(item.request_success),
-            request_failed: formatCount(item.request_failed),
-            request_count: formatCount(item.request_success + item.request_failed),
         })),
         refetchInterval: 30000,
         refetchOnMount: 'always',

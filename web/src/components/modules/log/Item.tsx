@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
-import { Clock, Cpu, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound } from 'lucide-react';
+import { Clock, Cpu, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, Gauge } from 'lucide-react';
 import { useTranslations } from 'use-intl';
 import { motion, AnimatePresence } from 'motion/react';
 import JsonView from '@uiw/react-json-view';
@@ -10,6 +10,7 @@ import { type RelayLog, type ChannelAttempt } from '@/api/endpoints/log';
 import { getModelIcon } from '@/lib/model-icons';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { formatTokensPerSec, tokensPerSecond } from '@/lib/metrics';
 import { CopyIconButton } from '@/components/common/CopyButton';
 import { dialogPanelClass } from '@/components/common/DialogShell';
 import {
@@ -190,6 +191,10 @@ export function LogCard({ log }: { log: RelayLog }) {
         [log.actual_model_name]
     );
     const requestAPIKeyName = useMemo(() => log.request_api_key_name?.trim() ?? '', [log.request_api_key_name]);
+    const tokensPerSecLabel = useMemo(() => {
+        const totalTokens = (log.input_tokens ?? 0) + (log.output_tokens ?? 0);
+        return formatTokensPerSec(tokensPerSecond(totalTokens, log.use_time ?? 0));
+    }, [log.input_tokens, log.output_tokens, log.use_time]);
 
     const hasError = !!log.error;
     const hasMultipleAttempts = log.attempts && log.attempts.length > 1;
@@ -234,7 +239,7 @@ export function LogCard({ log }: { log: RelayLog }) {
                                     <Pin className="size-3.5 shrink-0 text-amber-500" />
                                 )}
                             </div>
-                            <div className="grid grid-cols-2 md:grid-cols-7 gap-x-4 gap-y-2 text-xs tabular-nums text-muted-foreground">
+                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-x-4 gap-y-2 text-xs tabular-nums text-muted-foreground">
                                 <div className="flex items-center gap-1.5">
                                     <Clock className="size-3.5 shrink-0" style={{ color: brandColor }} />
                                     <span>{formatTime(log.time)}</span>
@@ -254,6 +259,10 @@ export function LogCard({ log }: { log: RelayLog }) {
                                 <div className="flex items-center gap-1.5">
                                     <Cpu className="size-3.5 shrink-0 text-blue-500" />
                                     <span>{t('totalTime')} {formatDuration(log.use_time)}</span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                    <Gauge className="size-3.5 shrink-0 text-cyan-500" />
+                                    <span>{t('tokensPerSec')} {tokensPerSecLabel}</span>
                                 </div>
                                 <div className="flex items-center gap-1.5">
                                     <ArrowDownToLine className="size-3.5 shrink-0 text-green-500" />
@@ -471,6 +480,10 @@ export function LogCard({ log }: { log: RelayLog }) {
                             <div className="flex items-center gap-1.5">
                                 <Cpu className="size-3.5 text-blue-500" />
                                 <span>{t('totalTime')}: {formatDuration(log.use_time)}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                                <Gauge className="size-3.5 text-cyan-500" />
+                                <span>{t('tokensPerSec')}: {tokensPerSecLabel}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                                 <DollarSign className="size-3.5 text-emerald-500" />

@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../client';
 import { logger } from '@/lib/logger';
-import { formatCount, formatMoney, formatTime } from '@/lib/utils';
-import { StatsChannel, type StatsMetricsFormatted } from './stats';
+import { StatsChannel, type StatsMetricsFormatted, formatStatsMetrics } from './stats';
 /**
  * 渠道类型枚举
  */
@@ -186,18 +185,15 @@ export function useChannelList() {
                 key_mode: item.key_mode || KeyMode.LeastCost,
                 allow_empty_key: item.allow_empty_key ?? false,
             }) satisfies Channel,
-            formatted: {
-                input_token: formatCount(item.stats.input_token),
-                output_token: formatCount(item.stats.output_token),
-                total_token: formatCount(item.stats.input_token + item.stats.output_token),
-                input_cost: formatMoney(item.stats.input_cost),
-                output_cost: formatMoney(item.stats.output_cost),
-                total_cost: formatMoney(item.stats.input_cost + item.stats.output_cost),
-                request_success: formatCount(item.stats.request_success),
-                request_failed: formatCount(item.stats.request_failed),
-                request_count: formatCount(item.stats.request_success + item.stats.request_failed),
-                wait_time: formatTime(item.stats.wait_time),
-            }
+            formatted: formatStatsMetrics(item.stats ?? {
+                input_token: 0,
+                output_token: 0,
+                input_cost: 0,
+                output_cost: 0,
+                wait_time: 0,
+                request_success: 0,
+                request_failed: 0,
+            }),
         })) as Array<{ raw: Channel; formatted: StatsMetricsFormatted }>,
         refetchInterval: 30000,
         refetchOnMount: 'always',
