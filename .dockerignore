@@ -1,0 +1,10 @@
+.git
+.gitignore
+web/node_modules
+web/dist
+static/out
+data
+build
+*.log
+Dockerfile
+.dockerignore
