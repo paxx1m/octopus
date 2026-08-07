@@ -45,8 +45,8 @@ func newOutbound(channelType llm.APIFormat, request *llm.Request, baseURL, key s
 	switch requestType {
 	case llm.RequestTypeEmbedding:
 		switch channelType {
+		// openai/responses outbound 不支持 embedding，误配会导致上游必失败
 		case llm.APIFormatOpenAIChatCompletion,
-			llm.APIFormatOpenAIResponse,
 			llm.APIFormatOpenAIEmbedding:
 			return openai.NewOutboundTransformer(baseURL, key)
 		case llm.APIFormatGeminiContents:
@@ -56,6 +56,9 @@ func newOutbound(channelType llm.APIFormat, request *llm.Request, baseURL, key s
 		default:
 			return nil, fmt.Errorf("channel type %s is not compatible with %s request", channelType, requestType)
 		}
+	case llm.RequestTypeRerank:
+		// Rerank is handled by dedicated RerankHandler (HTTP pass-through).
+		return nil, fmt.Errorf("%s request is not supported by pipeline relay; use /v1/rerank", requestType)
 	case llm.RequestTypeImage:
 		switch channelType {
 		case llm.APIFormatOpenAIChatCompletion,
