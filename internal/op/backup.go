@@ -97,6 +97,25 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 		return nil, fmt.Errorf("unsupported dump version: %d", dump.Version)
 	}
 
+	// Avoid GORM association Create on nested Keys/Stats during channel insert.
+	for i := range dump.Channels {
+		dump.Channels[i].Keys = nil
+		dump.Channels[i].Stats = nil
+	}
+
+	// IMPORTANT: collect disabled IDs BEFORE Create.
+	// GORM Create mutates in-memory structs: Enabled false → true (default tag),
+	// so scanning dump after Create would find zero disabled rows.
+	disabledChannelIDs := collectDisabledIDs(len(dump.Channels), func(i int) (int, bool) {
+		return dump.Channels[i].ID, !dump.Channels[i].Enabled
+	})
+	disabledKeyIDs := collectDisabledIDs(len(dump.ChannelKeys), func(i int) (int, bool) {
+		return dump.ChannelKeys[i].ID, !dump.ChannelKeys[i].Enabled
+	})
+	disabledAPIKeyIDs := collectDisabledIDs(len(dump.APIKeys), func(i int) (int, bool) {
+		return dump.APIKeys[i].ID, !dump.APIKeys[i].Enabled
+	})
+
 	conn := db.GetDB().WithContext(ctx)
 	res := &model.DBImportResult{RowsAffected: map[string]int64{}}
 
@@ -107,11 +126,19 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 		} else {
 			res.RowsAffected["channels"] = n
 		}
+		if err := forceEnabledFalse(tx, &model.Channel{}, disabledChannelIDs); err != nil {
+			return fmt.Errorf("import channels enabled flags: %w", err)
+		}
+
 		if n, err := createDoNothing(tx, dump.ChannelKeys); err != nil {
 			return fmt.Errorf("import channel_keys: %w", err)
 		} else {
 			res.RowsAffected["channel_keys"] = n
 		}
+		if err := forceEnabledFalse(tx, &model.ChannelKey{}, disabledKeyIDs); err != nil {
+			return fmt.Errorf("import channel_keys enabled flags: %w", err)
+		}
+
 		if n, err := createDoNothing(tx, dump.Groups); err != nil {
 			return fmt.Errorf("import groups: %w", err)
 		} else {
@@ -132,6 +159,10 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 		} else {
 			res.RowsAffected["api_keys"] = n
 		}
+		if err := forceEnabledFalse(tx, &model.APIKey{}, disabledAPIKeyIDs); err != nil {
+			return fmt.Errorf("import api_keys enabled flags: %w", err)
+		}
+
 		if n, err := createUpsertSettings(tx, dump.Settings); err != nil {
 			return fmt.Errorf("import settings: %w", err)
 		} else {
@@ -215,4 +246,25 @@ func createUpsertSettings(tx *gorm.DB, rows []model.Setting) (int64, error) {
 		DoUpdates: clause.AssignmentColumns([]string{"value"}),
 	}).Create(&rows)
 	return result.RowsAffected, result.Error
+}
+
+func collectDisabledIDs(n int, at func(i int) (id int, disabled bool)) []int {
+	ids := make([]int, 0)
+	for i := 0; i < n; i++ {
+		id, disabled := at(i)
+		if disabled && id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// forceEnabledFalse sets enabled=false after Create.
+// GORM Create both writes default true to DB and mutates the in-memory struct,
+// so disabled IDs must be collected before Create.
+func forceEnabledFalse(tx *gorm.DB, modelPtr any, ids []int) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return tx.Model(modelPtr).Where("id IN ?", ids).Update("enabled", false).Error
 }
