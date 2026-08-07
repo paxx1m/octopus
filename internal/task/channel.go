@@ -23,6 +23,9 @@ func ChannelBaseUrlDelayTask() {
 		return
 	}
 	for _, channel := range channels {
+		if !channel.Enabled {
+			continue
+		}
 		helper.ChannelBaseUrlDelayUpdate(&channel, ctx)
 	}
 }

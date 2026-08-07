@@ -31,6 +31,11 @@ func ChannelBaseUrlDelayUpdate(channel *model.Channel, ctx context.Context) {
 	if channel == nil {
 		return
 	}
+	// 禁用渠道不参与探测，避免无意义 HEAD 与 connection refused 噪音
+	if !channel.Enabled {
+		log.Debugf("skip base url delay for disabled channel=%d", channel.ID)
+		return
+	}
 	newBaseUrls := make([]model.BaseUrl, 0, len(channel.BaseUrls))
 	for _, baseUrl := range channel.BaseUrls {
 		if baseUrl.URL == "" {
