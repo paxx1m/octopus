@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/helper"
@@ -40,19 +42,11 @@ func RerankHandler() gin.HandlerFunc {
 			return
 		}
 
-		if supportedModels, exists := c.Get("supported_models"); exists {
-			if models, ok := supportedModels.([]string); ok && len(models) > 0 {
-				allowed := false
-				for _, m := range models {
-					if m == req.Model {
-						allowed = true
-						break
-					}
-				}
-				if !allowed {
-					resp.Error(c, http.StatusForbidden, "model not supported by this api key")
-					return
-				}
+		// 与主 relay 一致：中间件写入的是逗号分隔 string，不是 []string
+		if supportedModels := c.GetString("supported_models"); supportedModels != "" {
+			if !slices.Contains(strings.Split(supportedModels, ","), req.Model) {
+				resp.Error(c, http.StatusBadRequest, "model not supported")
+				return
 			}
 		}
 
@@ -72,22 +66,34 @@ func RerankHandler() gin.HandlerFunc {
 		startTime := time.Now()
 		ctx := c.Request.Context()
 		var lastErr error
-		var successChannelID int
-		var actualModel string
 
 		for iter.Next() {
 			if ctx.Err() != nil {
+				log.Infof("rerank request context canceled, stopping retry")
+				saveRerankMetrics(ctx, apiKeyID, req.Model, req.Model, startTime, false, context.Canceled, iter.Attempts(), 0)
 				return
 			}
 
 			ok, written, err := rerankTryChannel(c, iter, stickyKeyID, apiKeyID, req.Model, body)
-			if written || ok {
-				if ok {
-					item := iter.Item()
-					successChannelID = item.ChannelID
-					actualModel = item.ModelName
-					saveRerankMetrics(ctx, apiKeyID, req.Model, actualModel, startTime, true, nil, iter.Attempts(), successChannelID)
+			if ok {
+				item := iter.Item()
+				saveRerankMetrics(ctx, apiKeyID, req.Model, item.ModelName, startTime, true, nil, iter.Attempts(), item.ChannelID)
+				return
+			}
+			if written {
+				// 已向客户端写出部分内容：不能换渠道，仍记失败（如 copy 中途断开）
+				actual := req.Model
+				channelID := 0
+				if item := iter.Item(); item.ChannelID > 0 {
+					channelID = item.ChannelID
+					if item.ModelName != "" {
+						actual = item.ModelName
+					}
 				}
+				if err == nil {
+					err = errors.New("response partially written")
+				}
+				saveRerankMetrics(ctx, apiKeyID, req.Model, actual, startTime, false, err, iter.Attempts(), channelID)
 				return
 			}
 			if err != nil {
@@ -195,6 +201,12 @@ func rerankTryOneKey(
 	body []byte,
 	apiKeyID int,
 ) (ok, written bool, err error) {
+	// 熔断键与 SkipCircuitBreak 一致，使用上游候选模型名（item.ModelName）
+	circuitModel := upstreamModel
+	if circuitModel == "" {
+		circuitModel = requestModel
+	}
+
 	skipped, isProbe := iter.SkipCircuitBreak(channel.ID, usedKey.ID, channel.Name)
 	if skipped {
 		return false, false, nil
@@ -202,7 +214,7 @@ func rerankTryOneKey(
 	probeDone := false
 	defer func() {
 		if isProbe && !probeDone {
-			balancer.RecordProbeAborted(channel.ID, usedKey.ID, requestModel)
+			balancer.RecordProbeAborted(channel.ID, usedKey.ID, circuitModel)
 		}
 	}()
 
@@ -222,7 +234,7 @@ func rerankTryOneKey(
 			WaitTime:       span.Duration().Milliseconds(),
 			RequestSuccess: 1,
 		})
-		balancer.RecordSuccess(channel.ID, usedKey.ID, requestModel)
+		balancer.RecordSuccess(channel.ID, usedKey.ID, circuitModel)
 		balancer.SetSticky(apiKeyID, requestModel, channel.ID, usedKey.ID)
 		probeDone = true
 		return true, false, nil
@@ -234,7 +246,7 @@ func rerankTryOneKey(
 		WaitTime:      span.Duration().Milliseconds(),
 		RequestFailed: 1,
 	})
-	balancer.RecordFailure(channel.ID, usedKey.ID, requestModel)
+	balancer.RecordFailure(channel.ID, usedKey.ID, circuitModel)
 	probeDone = true
 	written = c.Writer.Written()
 	return false, written, fmt.Errorf("channel %s failed: %v", channel.Name, fwdErr)
