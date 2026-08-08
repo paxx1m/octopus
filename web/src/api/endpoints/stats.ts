@@ -19,6 +19,8 @@ interface StatsMetrics {
     input_cost: number;
     output_cost: number;
     wait_time: number;
+    /** ms, cumulative generation duration after first token (excludes TTFT) */
+    output_time?: number;
     request_success: number;
     request_failed: number;
 }
@@ -30,7 +32,7 @@ export interface StatsDerivedMetrics {
     /** average wait/latency ms */
     avg_latency_ms: number;
     avg_latency_label: string;
-    /** tokens per second from cumulative totals */
+    /** output tokens per second over cumulative output_time */
     tokens_per_sec: number;
     tokens_per_sec_label: string;
 }
@@ -54,10 +56,12 @@ export function deriveStatsMetrics(item: StatsMetrics): StatsDerivedMetrics {
     const success = item.request_success ?? 0;
     const failed = item.request_failed ?? 0;
     const wait = item.wait_time ?? 0;
-    const tokens = (item.input_token ?? 0) + (item.output_token ?? 0);
+    const output = item.output_token ?? 0;
+    const outputTime = item.output_time ?? 0;
     const rate = successRatePercent(success, failed);
     const avgMs = avgLatencyMs(wait, success, failed);
-    const tps = tokensPerSecond(tokens, wait);
+    // output_time is already the post-TTFT generation window (or full duration for non-stream).
+    const tps = outputTime > 0 ? tokensPerSecond(output, outputTime) : 0;
     return {
         success_rate: rate,
         success_rate_label: formatSuccessRate(rate),

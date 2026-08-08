@@ -191,6 +191,7 @@ export function useChannelList() {
                 input_cost: 0,
                 output_cost: 0,
                 wait_time: 0,
+                output_time: 0,
                 request_success: 0,
                 request_failed: 0,
             }),

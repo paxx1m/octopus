@@ -10,7 +10,7 @@ import { type RelayLog, type ChannelAttempt } from '@/api/endpoints/log';
 import { getModelIcon } from '@/lib/model-icons';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { formatTokensPerSec, tokensPerSecond } from '@/lib/metrics';
+import { formatTokensPerSec, outputTokensPerSecond } from '@/lib/metrics';
 import { CopyIconButton } from '@/components/common/CopyButton';
 import { dialogPanelClass } from '@/components/common/DialogShell';
 import {
@@ -192,9 +192,10 @@ export function LogCard({ log }: { log: RelayLog }) {
     );
     const requestAPIKeyName = useMemo(() => log.request_api_key_name?.trim() ?? '', [log.request_api_key_name]);
     const tokensPerSecLabel = useMemo(() => {
-        const totalTokens = (log.input_tokens ?? 0) + (log.output_tokens ?? 0);
-        return formatTokensPerSec(tokensPerSecond(totalTokens, log.use_time ?? 0));
-    }, [log.input_tokens, log.output_tokens, log.use_time]);
+        return formatTokensPerSec(
+            outputTokensPerSecond(log.output_tokens ?? 0, log.use_time ?? 0, log.ftut ?? 0),
+        );
+    }, [log.output_tokens, log.use_time, log.ftut]);
 
     const hasError = !!log.error;
     const hasMultipleAttempts = log.attempts && log.attempts.length > 1;

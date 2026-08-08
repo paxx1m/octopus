@@ -131,7 +131,13 @@ export function VirtualizedGrid<T>({
     const virtualRows = rowVirtualizer.getVirtualItems();
 
     useEffect(() => {
-        if (!onReachEnd || !reachEndEnabled || itemRowCount === 0) return;
+        if (!onReachEnd || itemRowCount === 0) return;
+
+        // Reset while disabled (e.g. loading) so we can re-fire when still near end after load.
+        if (!reachEndEnabled) {
+            reachEndTriggeredRef.current = false;
+            return;
+        }
 
         const lastVirtualIndex = virtualRows.length > 0 ? virtualRows[virtualRows.length - 1]!.index : -1;
         const triggerIndex = Math.max(0, itemRowCount - 1 - reachEndOffset);

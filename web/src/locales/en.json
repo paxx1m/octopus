@@ -136,7 +136,7 @@
             "noData": "No channel data",
             "enabled": "Enabled",
             "disabled": "Disabled",
-            "hint": "Top 3 show medals. Success rate and avg latency are derived from cumulative stats; Tokens/s = total tokens ÷ total wait time (includes failures).",
+            "hint": "Top 3 show medals. Success rate and avg latency are derived from cumulative stats; Tokens/s = output tokens ÷ generation time (excludes TTFT; non-stream uses full duration).",
             "columns": {
                 "channel": "Channel",
                 "requests": "Requests",

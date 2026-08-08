@@ -26,14 +26,31 @@ export function avgLatencyMs(waitTimeSumMs: number, success: number, failed: num
 }
 
 /**
- * Tokens per second.
- * @param tokens total tokens (input+output)
+ * Tokens per second over a duration window.
+ * @param tokens token count
  * @param durationMs elapsed milliseconds
  */
 export function tokensPerSecond(tokens: number, durationMs: number): number {
     if (!Number.isFinite(tokens) || !Number.isFinite(durationMs)) return 0;
     if (tokens <= 0 || durationMs <= 0) return 0;
     return tokens / (durationMs / 1000);
+}
+
+/**
+ * Output tokens/s after first token (excludes TTFT).
+ * Non-stream (firstTokenMs <= 0): falls back to output / totalDuration.
+ */
+export function outputTokensPerSecond(
+    outputTokens: number,
+    totalDurationMs: number,
+    firstTokenMs = 0,
+): number {
+    if (!Number.isFinite(outputTokens) || outputTokens <= 0) return 0;
+    if (!Number.isFinite(totalDurationMs) || totalDurationMs <= 0) return 0;
+    const ttft = Number.isFinite(firstTokenMs) && firstTokenMs > 0 ? firstTokenMs : 0;
+    const generationMs = ttft > 0 ? totalDurationMs - ttft : totalDurationMs;
+    if (generationMs <= 0) return 0;
+    return outputTokens / (generationMs / 1000);
 }
 
 export function formatSuccessRate(rate: number): string {

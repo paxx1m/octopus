@@ -64,9 +64,11 @@ func (m *RelayMetrics) RecordUsage(usage *llm.Usage) {
 
 func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attempts []model.ChannelAttempt) {
 	duration := time.Since(m.StartTime)
+	durationMs := duration.Milliseconds()
+	outputTimeMs := outputTimeMilliseconds(m.StartTime, m.FirstTokenTime, durationMs)
 
 	globalStats := model.StatsMetrics{
-		WaitTime:    duration.Milliseconds(),
+		WaitTime:    durationMs,
 		InputToken:  m.Stats.InputToken,
 		OutputToken: m.Stats.OutputToken,
 		InputCost:   m.Stats.InputCost,
@@ -74,6 +76,10 @@ func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attemp
 	}
 	if success {
 		globalStats.RequestSuccess = 1
+		// Only count generation window for successful responses with output tokens.
+		if m.Stats.OutputToken > 0 && outputTimeMs > 0 {
+			globalStats.OutputTime = outputTimeMs
+		}
 	} else {
 		globalStats.RequestFailed = 1
 	}
@@ -85,12 +91,16 @@ func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attemp
 	op.StatsAPIKeyUpdate(m.APIKeyID, globalStats)
 	if channelID > 0 {
 		// 通道成功/失败和等待时间在每次 attempt 结束时已记录；这里仅把最终响应的用量成本归到实际通道，避免重复计数。
-		op.StatsChannelUpdate(channelID, model.StatsMetrics{
+		channelStats := model.StatsMetrics{
 			InputToken:  m.Stats.InputToken,
 			OutputToken: m.Stats.OutputToken,
 			InputCost:   m.Stats.InputCost,
 			OutputCost:  m.Stats.OutputCost,
-		})
+		}
+		if success && m.Stats.OutputToken > 0 && outputTimeMs > 0 {
+			channelStats.OutputTime = outputTimeMs
+		}
+		op.StatsChannelUpdate(channelID, channelStats)
 	}
 
 	log.Infof("relay complete: model=%s, channel=%d(%s), success=%t, duration=%dms, input_token=%d, output_token=%d, input_cost=%f, output_cost=%f, total_cost=%f, attempts=%d",
@@ -101,6 +111,26 @@ func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attemp
 
 	// 客户端断开或请求上下文取消后仍要保存最终审计日志，因此持久化阶段主动脱离请求取消信号。
 	m.saveLog(context.WithoutCancel(ctx), err, duration, attempts, channelID, channelName)
+}
+
+// outputTimeMilliseconds is the generation window used for output tokens/s.
+// Streaming: total duration minus TTFT. Non-stream (no first token): full duration.
+func outputTimeMilliseconds(startTime, firstTokenTime time.Time, durationMs int64) int64 {
+	if durationMs <= 0 {
+		return 0
+	}
+	if firstTokenTime.IsZero() || startTime.IsZero() {
+		return durationMs
+	}
+	ttftMs := firstTokenTime.Sub(startTime).Milliseconds()
+	if ttftMs <= 0 {
+		return durationMs
+	}
+	out := durationMs - ttftMs
+	if out <= 0 {
+		return 0
+	}
+	return out
 }
 
 func finalChannel(attempts []model.ChannelAttempt) (int, string) {
