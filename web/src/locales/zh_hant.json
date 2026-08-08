@@ -16,6 +16,12 @@
         "button": {
             "loading": "登入中...",
             "submit": "登入"
+        },
+        "forceChange": {
+            "title": "請修改預設密碼",
+            "hint": "偵測到仍在使用初始管理員密碼，繼續使用前必須修改。",
+            "submit": "修改並重新登入",
+            "defaultForbidden": "請勿繼續使用預設密碼 admin"
         }
     },
     "apiKeyDashboard": {

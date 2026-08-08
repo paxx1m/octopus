@@ -123,122 +123,36 @@ func (r *relayRun) run() {
 }
 
 // tryChannel 处理当前分组候选渠道，并在渠道内做 Key 快路径 / 多 Key 故障转移。
-//
-// 返回值语义：
-//   - ok=true：本次转发成功（可结束整个请求）
-//   - written=true：响应已开始写给客户端（流式首 token 已发出），不可再换渠道/Key
-//   - err：失败原因（written=false 时可被外层继续重试）
-//
-// 渠道内 Key 选择分层：
-//  1. allow_empty_key：不走 Key 管理器，直接空 Key 转发
-//  2. 0 可用 Key：跳过本渠道
-//  3. 1 可用 Key：单次尝试（仍走 OnResult / 熔断）
-//  4. ≥2 可用 Key：按 KeyMode 选择并在同渠道内故障转移，耗尽后再换渠道
-//
-// 429 冷却恢复说明：
-//
-//	Key 被 429 后不会从列表物理删除，只是 IsAvailable 在冷却期内返回 false。
-//	冷却结束后（now - LastUseTimeStamp >= cooldown），下次 ListAvailable/Select
-//	会自动再次选中该 Key，无需后台任务“补回列表”。
+// 公共选 Key / 粘性逻辑见 tryChannelWithKeys。
 func (r *relayRun) tryChannel() (ok, written bool, err error) {
-	item := r.iter.Item()
-	channel, err := op.ChannelGet(item.ChannelID, r.c.Request.Context())
-	if err != nil {
-		log.Warnf("failed to get channel %d: %v", item.ChannelID, err)
-		r.iter.Skip(item.ChannelID, 0, fmt.Sprintf("channel_%d", item.ChannelID), fmt.Sprintf("channel not found: %v", err))
-		return false, false, err
-	}
-	if !channel.Enabled {
-		r.iter.Skip(channel.ID, 0, channel.Name, "channel disabled")
-		return false, false, nil
-	}
-
-	// 无需 API Key 的上游：整次请求只用空 Key，失败后直接换下一渠道。
-	if channel.AllowEmptyKey {
-		return r.tryOneKey(channel, dbmodel.ChannelKey{}, item.ModelName)
-	}
-
-	// 粘性会话：仅当当前候选就是粘性渠道时生效。
-	// - sticky key 仍可用：优先试它
-	// - sticky key 临时不可用（如 429 冷却）或本次失败：同渠道换其他 Key，保留渠道亲和
-	// - sticky key 已删除/永久禁用：清除会话粘性
-	exclude := map[int]struct{}{}
-	if r.iter.IsSticky() && r.stickyKeyID > 0 {
-		var stickyKey *dbmodel.ChannelKey
-		for i := range channel.Keys {
-			if channel.Keys[i].ID == r.stickyKeyID {
-				stickyKey = &channel.Keys[i]
-				break
-			}
-		}
-		if stickyKey == nil || !stickyKey.Enabled || stickyKey.ChannelKey == "" {
-			balancer.ClearSticky(r.metrics.APIKeyID, r.metrics.RequestModel)
-			r.stickyKeyID = 0
-		} else if keymanager.IsAvailable(channel, *stickyKey, time.Now().Unix()) {
-			success, written, err := r.tryOneKey(channel, *stickyKey, item.ModelName)
-			if success || written {
-				return success, written, err
-			}
-			// 本次 sticky key 失败：排除后继续同渠道其他 Key。
-			exclude[stickyKey.ID] = struct{}{}
-		} else {
-			// 冷却中：跳过 sticky key，但渠道亲和仍保留。
-			exclude[stickyKey.ID] = struct{}{}
-		}
-	}
-
-	available := keymanager.ListAvailable(channel, exclude)
-	switch len(available) {
-	case 0:
-		r.iter.Skip(channel.ID, 0, channel.Name, "no available key")
-		return false, false, nil
-	case 1:
-		// 单 Key：没有“换 Key”空间，只做一次真实转发。
-		return r.tryOneKey(channel, available[0], item.ModelName)
-	default:
-		// 多 Key：在同渠道内按策略选择并故障转移，直到无可用 Key。
-		var lastErr error
-		for {
-			// 请求端已断开/取消（如客户端超时）：不再浪费性重试剩余 Key，
-			// 直接以 context.Canceled 结束，避免把客户端取消记成渠道/Key 失败。
-			if r.c.Request.Context().Err() != nil {
-				return false, false, context.Canceled
-			}
-			// 每次循环重新取缓存快照，使上一 Key 的 429/禁用状态对本循环可见。
-			if refreshed, getErr := op.ChannelGet(channel.ID, r.c.Request.Context()); getErr == nil {
-				channel = refreshed
-			}
-			key, okSel := keymanager.Select(channel, exclude)
-			if !okSel {
-				break
-			}
-			success, written, err := r.tryOneKey(channel, key, item.ModelName)
-			if success || written {
-				return success, written, err
-			}
-			if err != nil {
-				lastErr = err
-			}
-			// 本请求内不再重试该 Key（即使冷却逻辑上仍“可用”）。
-			exclude[key.ID] = struct{}{}
-		}
-		return false, false, lastErr
-	}
+	return tryChannelWithKeys(r.c, r.iter, &r.stickyKeyID, r.metrics.APIKeyID, r.metrics.RequestModel, r.tryOneKey)
 }
 
-// tryOneKey builds outbound adapter, checks circuit breaker, and runs one forward attempt.
+// tryOneKey 构建出站适配器、检查熔断，并执行一次转发。
+// modelName 为候选上游模型名，与 SkipCircuitBreak / Record* 熔断键一致。
 func (r *relayRun) tryOneKey(channel *dbmodel.Channel, usedKey dbmodel.ChannelKey, modelName string) (ok, written bool, err error) {
+	// 熔断键始终使用候选模型名（item.ModelName），与 iterator.SkipCircuitBreak 同源。
+	circuitModel := modelName
+	if circuitModel == "" {
+		circuitModel = r.metrics.RequestModel
+	}
+
 	skipped, isProbe := r.iter.SkipCircuitBreak(channel.ID, usedKey.ID, channel.Name)
 	if skipped {
 		return false, false, nil
 	}
-	// Any exit before RecordSuccess/Failure on a HalfOpen probe must abort the probe.
+	// HalfOpen 探测在真正转发前退出时必须 abort，避免永久卡在 HalfOpen。
 	probeDone := false
 	defer func() {
 		if isProbe && !probeDone {
-			balancer.RecordProbeAborted(channel.ID, usedKey.ID, modelName)
+			balancer.RecordProbeAborted(channel.ID, usedKey.ID, circuitModel)
 		}
 	}()
+
+	// 仅本次 attempt 使用上游模型名，避免污染后续候选渠道的映射。
+	origModel := r.internalRequest.Model
+	r.internalRequest.Model = modelName
+	defer func() { r.internalRequest.Model = origModel }()
 
 	outAdapter, err := newOutbound(channel.Type, r.internalRequest, channel.GetBaseUrl(), usedKey.ChannelKey)
 	if err != nil {
@@ -246,7 +160,6 @@ func (r *relayRun) tryOneKey(channel *dbmodel.Channel, usedKey dbmodel.ChannelKe
 		return false, false, nil
 	}
 
-	r.internalRequest.Model = modelName
 	r.metrics.ActualModel = modelName
 	r.metrics.ParamOverride = ""
 	log.Infof("request model %s, mode: %d, forwarding to channel: %s model: %s key: %d (attempt %d/%d, sticky=%t)",
@@ -254,13 +167,13 @@ func (r *relayRun) tryOneKey(channel *dbmodel.Channel, usedKey dbmodel.ChannelKe
 		r.iter.Index()+1, r.iter.Len(), r.iter.IsSticky())
 
 	ra := &relayAttempt{
-		relayRun:   r,
-		outAdapter: outAdapter,
-		channel:    channel,
-		usedKey:    usedKey,
+		relayRun:     r,
+		outAdapter:   outAdapter,
+		channel:      channel,
+		usedKey:      usedKey,
+		circuitModel: circuitModel,
 	}
 	ok, written, err = ra.run()
-	// run() always calls RecordSuccess or RecordFailure for real forwards.
 	probeDone = true
 	return ok, written, err
 }
@@ -284,7 +197,7 @@ func (ra *relayAttempt) run() (bool, bool, error) {
 			WaitTime:       span.Duration().Milliseconds(),
 			RequestSuccess: 1,
 		})
-		balancer.RecordSuccess(ra.channel.ID, ra.usedKey.ID, ra.internalRequest.Model)
+		balancer.RecordSuccess(ra.channel.ID, ra.usedKey.ID, ra.circuitModel)
 		balancer.SetSticky(ra.metrics.APIKeyID, ra.metrics.RequestModel, ra.channel.ID, ra.usedKey.ID)
 		return true, false, nil
 	}
@@ -295,7 +208,7 @@ func (ra *relayAttempt) run() (bool, bool, error) {
 		WaitTime:      span.Duration().Milliseconds(),
 		RequestFailed: 1,
 	})
-	balancer.RecordFailure(ra.channel.ID, ra.usedKey.ID, ra.internalRequest.Model)
+	balancer.RecordFailure(ra.channel.ID, ra.usedKey.ID, ra.circuitModel)
 
 	written := ra.c.Writer.Written()
 	return false, written, fmt.Errorf("channel %s failed: %v", ra.channel.Name, fwdErr)

@@ -76,7 +76,7 @@ func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attemp
 	}
 	if success {
 		globalStats.RequestSuccess = 1
-		// Only count generation window for successful responses with output tokens.
+	// 仅成功且有输出 token 时计入生成窗口（用于 Tokens/s）
 		if m.Stats.OutputToken > 0 && outputTimeMs > 0 {
 			globalStats.OutputTime = outputTimeMs
 		}
@@ -113,8 +113,8 @@ func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attemp
 	m.saveLog(context.WithoutCancel(ctx), err, duration, attempts, channelID, channelName)
 }
 
-// outputTimeMilliseconds is the generation window used for output tokens/s.
-// Streaming: total duration minus TTFT. Non-stream (no first token): full duration.
+// outputTimeMilliseconds 计算输出阶段耗时（用于 Tokens/s）。
+// 流式：总时长减去首字时间；非流式（无首字）：整段时长。
 func outputTimeMilliseconds(startTime, firstTokenTime time.Time, durationMs int64) int64 {
 	if durationMs <= 0 {
 		return 0

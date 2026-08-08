@@ -23,7 +23,8 @@ type relayRun struct {
 type relayAttempt struct {
 	*relayRun
 
-	outAdapter transformer.Outbound
-	channel    *dbmodel.Channel
-	usedKey    dbmodel.ChannelKey
+	outAdapter   transformer.Outbound
+	channel      *dbmodel.Channel
+	usedKey      dbmodel.ChannelKey
+	circuitModel string // 熔断键模型名，与 SkipCircuitBreak 同源
 }

@@ -7,16 +7,18 @@ import (
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/price"
+	"github.com/bestruirui/octopus/internal/relay/balancer"
 	"github.com/bestruirui/octopus/internal/utils/log"
 )
 
 const (
-	TaskPriceUpdate  = "price_update"
-	TaskStatsSave    = "stats_save"
-	TaskRelayLogSave = "relay_log_save"
-	TaskSyncLLM      = "sync_llm"
-	TaskCleanLLM     = "clean_llm"
-	TaskBaseUrlDelay = "base_url_delay"
+	TaskPriceUpdate    = "price_update"
+	TaskStatsSave      = "stats_save"
+	TaskRelayLogSave   = "relay_log_save"
+	TaskSyncLLM        = "sync_llm"
+	TaskCleanLLM       = "clean_llm"
+	TaskBaseUrlDelay   = "base_url_delay"
+	TaskRuntimeCleanup = "runtime_cleanup"
 )
 
 func Init() {
@@ -59,4 +61,7 @@ func Init() {
 			log.Warnf("relay log save db task failed: %v", err)
 		}
 	})
+
+	// 熔断/粘性会话等运行时状态清理
+	Register(TaskRuntimeCleanup, 30*time.Minute, false, balancer.CleanupRuntimeState)
 }

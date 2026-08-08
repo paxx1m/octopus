@@ -25,6 +25,15 @@ func Auth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		// 强制改密期间仅允许改密与状态查询，防止绕过前端直接调管理 API
+		if op.UserMustChangePassword() {
+			path := c.Request.URL.Path
+			if path != "/api/v1/user/change-password" && path != "/api/v1/user/status" {
+				resp.Error(c, http.StatusForbidden, "must change default password before continuing")
+				c.Abort()
+				return
+			}
+		}
 		c.Next()
 	}
 }

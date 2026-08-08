@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
@@ -17,6 +19,7 @@ func init() {
 		Use(middleware.RequireJSON()).
 		AddRoute(
 			router.NewRoute("/login", http.MethodPost).
+				Use(middleware.LoginRateLimit(10, 15*time.Minute)).
 				Handle(login),
 		)
 	router.NewGroupRouter("/api/v1/user").
@@ -51,7 +54,11 @@ func login(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, resp.ErrInternalServer)
 		return
 	}
-	resp.Success(c, model.UserLoginResponse{Token: token, ExpireAt: expire})
+	resp.Success(c, model.UserLoginResponse{
+		Token:              token,
+		ExpireAt:           expire,
+		MustChangePassword: op.UserMustChangePassword(),
+	})
 }
 
 func changePassword(c *gin.Context) {
@@ -61,6 +68,12 @@ func changePassword(c *gin.Context) {
 		return
 	}
 	if err := op.UserChangePassword(user.OldPassword, user.NewPassword); err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "incorrect") || strings.Contains(msg, "required") ||
+			strings.Contains(msg, "differ") || strings.Contains(msg, "default") {
+			resp.Error(c, http.StatusBadRequest, msg)
+			return
+		}
 		resp.Error(c, http.StatusInternalServerError, resp.ErrDatabase)
 		return
 	}
@@ -74,12 +87,16 @@ func changeUsername(c *gin.Context) {
 		return
 	}
 	if err := op.UserChangeUsername(user.NewUsername); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	resp.Success(c, "username changed successfully")
 }
 
 func status(c *gin.Context) {
-	resp.Success(c, "ok")
+	u := op.UserGet()
+	resp.Success(c, model.UserStatusResponse{
+		Username:           u.Username,
+		MustChangePassword: u.MustChangePassword,
+	})
 }

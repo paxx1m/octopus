@@ -16,6 +16,12 @@
         "button": {
             "loading": "登录中...",
             "submit": "登录"
+        },
+        "forceChange": {
+            "title": "请修改默认密码",
+            "hint": "检测到仍在使用初始管理员密码，继续使用前必须修改。",
+            "submit": "修改并重新登录",
+            "defaultForbidden": "请勿继续使用默认密码 admin"
         }
     },
     "apiKeyDashboard": {

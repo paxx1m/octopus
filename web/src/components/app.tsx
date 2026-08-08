@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from "motion/react"
 import { useAuth } from '@/api/endpoints/user';
 import { LoginForm } from '@/components/modules/login';
+import { ForceChangePassword } from '@/components/modules/login/ForceChangePassword';
 import { APIKeyDashboard } from '@/components/modules/apikey-dashboard';
 import { ContentLoader } from '@/route/content-loader';
 import { NavBar, useNavStore } from '@/components/modules/navbar';
@@ -20,7 +21,7 @@ function timeout(ms: number) {
 }
 
 export function AppContainer() {
-    const { isAuthenticated, isAPIKeyAuth, isLoading: authLoading } = useAuth();
+    const { isAuthenticated, isAPIKeyAuth, mustChangePassword, isLoading: authLoading } = useAuth();
     const { activeItem, direction } = useNavStore();
     const t = useTranslations('navbar');
     const queryClient = useQueryClient();
@@ -197,6 +198,15 @@ export function AppContainer() {
         return (
             <AnimatePresence mode="wait">
                 <LoginForm key="login" />
+            </AnimatePresence>
+        );
+    }
+
+    // 首次登录强制修改默认密码
+    if (mustChangePassword) {
+        return (
+            <AnimatePresence mode="wait">
+                <ForceChangePassword key="force-change-password" />
             </AnimatePresence>
         );
     }

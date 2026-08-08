@@ -103,6 +103,8 @@ func exportDB(c *gin.Context) {
 	c.JSON(http.StatusOK, dump)
 }
 
+const maxImportBodyBytes = 64 << 20 // 64 MiB
+
 func importDB(c *gin.Context) {
 	var dump model.DBDump
 
@@ -113,15 +115,23 @@ func importDB(c *gin.Context) {
 			resp.Error(c, http.StatusBadRequest, "missing upload file field 'file'")
 			return
 		}
+		if fh.Size > maxImportBodyBytes {
+			resp.Error(c, http.StatusRequestEntityTooLarge, "import file too large")
+			return
+		}
 		f, err := fh.Open()
 		if err != nil {
 			resp.Error(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		defer f.Close()
-		body, err := io.ReadAll(f)
+		body, err := io.ReadAll(io.LimitReader(f, maxImportBodyBytes+1))
 		if err != nil {
 			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		if int64(len(body)) > maxImportBodyBytes {
+			resp.Error(c, http.StatusRequestEntityTooLarge, "import file too large")
 			return
 		}
 		if err := decodeDBDump(body, &dump); err != nil {
@@ -129,6 +139,7 @@ func importDB(c *gin.Context) {
 			return
 		}
 	} else {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxImportBodyBytes)
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
 			resp.Error(c, http.StatusBadRequest, err.Error())

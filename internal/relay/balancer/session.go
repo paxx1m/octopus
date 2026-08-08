@@ -76,3 +76,25 @@ func ClearStickyByChannel(channelID int) {
 		return true
 	})
 }
+
+// cleanupExpiredSessions 清理超过 maxAge 的粘性会话。
+func cleanupExpiredSessions(maxAge time.Duration) int {
+	removed := 0
+	now := time.Now()
+	globalSession.Range(func(k, v any) bool {
+		entry := v.(*SessionEntry)
+		if now.Sub(entry.Timestamp) > maxAge {
+			globalSession.Delete(k)
+			removed++
+		}
+		return true
+	})
+	return removed
+}
+
+// CleanupRuntimeState 定期清理熔断与粘性会话中的陈旧条目。
+func CleanupRuntimeState() {
+	// 粘性默认最长 24h；熔断 Closed 空闲 2h 后回收
+	_ = cleanupExpiredSessions(24 * time.Hour)
+	_ = cleanupCircuitEntries(2 * time.Hour)
+}

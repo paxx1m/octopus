@@ -92,14 +92,28 @@ async function request<T>(
         }
     }
 
-    // 发送请求
-    const response = await fetch(url.toString(), {
-        method,
-        headers,
-        body,
-    });
+    const controller = new AbortController();
+    const timeoutMs = 120_000;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    return handleResponse<T>(response);
+    try {
+        const response = await fetch(url.toString(), {
+            method,
+            headers,
+            body,
+            signal: controller.signal,
+        });
+        return await handleResponse<T>(response);
+    } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+            const error: ApiError = { code: 0, message: 'Request timeout' };
+            handleError(error);
+            throw error;
+        }
+        throw err;
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 /**

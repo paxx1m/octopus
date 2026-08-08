@@ -18,17 +18,28 @@ func UserInit() error {
 	defer userCacheLock.Unlock()
 
 	if err := db.GetDB().First(&userCache).Error; err == nil {
+		// 已有用户仍使用默认密码 admin 时，强制下次改密
+		if !userCache.MustChangePassword && userCache.ComparePassword("admin") == nil {
+			if err := db.GetDB().Model(&model.User{}).Where("id = ?", userCache.ID).
+				Update("must_change_password", true).Error; err != nil {
+				log.Warnf("failed to mark must_change_password: %v", err)
+			} else {
+				userCache.MustChangePassword = true
+				log.Warnf("default password detected; must change password on next login")
+			}
+		}
 		return nil
 	}
 	userCache.Username = "admin"
 	userCache.Password = "admin"
+	userCache.MustChangePassword = true
 	if err := userCache.HashPassword(); err != nil {
 		return err
 	}
 	if err := db.GetDB().Create(&userCache).Error; err != nil {
 		return err
 	}
-	log.Infof("initial user: admin,password: admin")
+	log.Infof("initial user: admin / admin (must change password on first login)")
 	return nil
 }
 
@@ -37,7 +48,17 @@ func UserChangePassword(oldPassword, newPassword string) error {
 	defer userCacheLock.Unlock()
 
 	if err := userCache.ComparePassword(oldPassword); err != nil {
-		return fmt.Errorf("incorrect old password: %w", err)
+		return fmt.Errorf("incorrect old password")
+	}
+	if newPassword == "" {
+		return fmt.Errorf("new password is required")
+	}
+	if newPassword == oldPassword {
+		return fmt.Errorf("new password must differ from old password")
+	}
+	// 默认 admin/admin 场景：强制改密时禁止继续使用 admin
+	if userCache.MustChangePassword && newPassword == "admin" {
+		return fmt.Errorf("please choose a password other than the default")
 	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
@@ -46,11 +67,18 @@ func UserChangePassword(oldPassword, newPassword string) error {
 	}
 	hashedStr := string(hashed)
 
+	nextVer := userCache.TokenVersion + 1
 	if err := db.GetDB().Model(&model.User{}).Where("id = ?", userCache.ID).
-		Update("password", hashedStr).Error; err != nil {
+		Updates(map[string]any{
+			"password":             hashedStr,
+			"must_change_password": false,
+			"token_version":        nextVer,
+		}).Error; err != nil {
 		return fmt.Errorf("failed to update password: %w", err)
 	}
 	userCache.Password = hashedStr
+	userCache.MustChangePassword = false
+	userCache.TokenVersion = nextVer
 	return nil
 }
 
@@ -86,4 +114,17 @@ func UserGet() model.User {
 	userCacheLock.RLock()
 	defer userCacheLock.RUnlock()
 	return userCache
+}
+
+func UserMustChangePassword() bool {
+	userCacheLock.RLock()
+	defer userCacheLock.RUnlock()
+	return userCache.MustChangePassword
+}
+
+// UserTokenVersion 返回当前 token 版本，供 JWT 签发/校验。
+func UserTokenVersion() int {
+	userCacheLock.RLock()
+	defer userCacheLock.RUnlock()
+	return userCache.TokenVersion
 }

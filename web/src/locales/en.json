@@ -16,6 +16,12 @@
         "button": {
             "loading": "Logging in...",
             "submit": "Login"
+        },
+        "forceChange": {
+            "title": "Change default password",
+            "hint": "You are still using the initial admin password. Change it before continuing.",
+            "submit": "Change and re-login",
+            "defaultForbidden": "Do not keep using the default password \"admin\""
         }
     },
     "apiKeyDashboard": {

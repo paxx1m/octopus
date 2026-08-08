@@ -11,14 +11,16 @@ import (
 
 func Cors() gin.HandlerFunc {
 	config := cors.DefaultConfig()
-	config.AllowCredentials = true
+	// 管理端使用 Authorization Bearer，不依赖 cookie；关闭 credentials
+	// 避免与 "*" 白名单组合时违反浏览器规范。
+	config.AllowCredentials = false
 	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
 	config.AllowHeaders = []string{"*"}
 	config.ExposeHeaders = []string{"Content-Disposition"}
 	// CORS 白名单:
 	// - 为空: 不允许跨域
 	// - "*": 允许所有来源
-	// - 逗号分隔的域名列表: 只允许指定的域名 (如 "https://example.com,https://example2.com")
+	// - 逗号分隔的域名列表: 只允许指定的域名
 	config.AllowOriginFunc = func(origin string) bool {
 		allowed, err := op.SettingGetString(model.SettingKeyCORSAllowOrigins)
 		if err != nil {
@@ -37,7 +39,6 @@ func Cors() gin.HandlerFunc {
 			return false
 		}
 
-		// 提取 origin 的 host 部分用于匹配
 		originHost := origin
 		if idx := strings.Index(origin, "://"); idx != -1 {
 			originHost = origin[idx+3:]
@@ -50,7 +51,6 @@ func Cors() gin.HandlerFunc {
 			if item == "" {
 				continue
 			}
-			// 支持完整 origin (https://example.com) 或仅域名 (example.com)
 			if item == origin || item == originHost {
 				return true
 			}

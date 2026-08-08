@@ -140,6 +140,7 @@ func registerRoute(group *gin.RouterGroup, method string, path string, handlers 
 	case http.MethodPatch:
 		group.PATCH(path, handlers...)
 	default:
-		group.GET(path, handlers...)
+		// 未知 method 不注册，避免误绑到 GET
+		return
 	}
 }

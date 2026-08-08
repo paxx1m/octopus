@@ -14,8 +14,8 @@ func InitCache() error {
 	return loadCache(ctx)
 }
 
-// ReloadCache flushes in-memory runtime state then reloads from DB.
-// Use after import so unsaved channel key costs and stats are not discarded.
+// ReloadCache 先落盘内存运行态再从 DB 重载。
+// 导入后调用，避免未保存的 key 费用与统计被丢弃。
 func ReloadCache() error {
 	if err := SaveCache(); err != nil {
 		log.Warnf("save cache before reload failed (continuing reload): %v", err)

@@ -24,10 +24,13 @@ import (
 	"github.com/looplj/axonhub/llm/transformer"
 )
 
-// RerankHandler handles POST /v1/rerank (Jina/Cohere-style JSON pass-through).
-// Reuses group LB, keymanager, circuit breaker, stats and relay logs.
+const maxRerankBodyBytes = 16 << 20 // 16 MiB
+
+// RerankHandler 处理 POST /v1/rerank（Jina/Cohere 风格 JSON 透传）。
+// 复用分组 LB、keymanager、熔断、统计与中继日志。
 func RerankHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRerankBodyBytes)
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
 			resp.Error(c, http.StatusBadRequest, "failed to read request body")
@@ -74,7 +77,10 @@ func RerankHandler() gin.HandlerFunc {
 				return
 			}
 
-			ok, written, err := rerankTryChannel(c, iter, stickyKeyID, apiKeyID, req.Model, body)
+			ok, written, err := tryChannelWithKeys(c, iter, &stickyKeyID, apiKeyID, req.Model,
+				func(channel *dbmodel.Channel, key dbmodel.ChannelKey, upstreamModel string) (bool, bool, error) {
+					return rerankTryOneKey(c, iter, channel, key, upstreamModel, req.Model, body, apiKeyID)
+				})
 			if ok {
 				item := iter.Item()
 				saveRerankMetrics(ctx, apiKeyID, req.Model, item.ModelName, startTime, true, nil, iter.Attempts(), item.ChannelID)
@@ -108,87 +114,6 @@ func RerankHandler() gin.HandlerFunc {
 		if !c.Writer.Written() {
 			resp.Error(c, http.StatusBadGateway, lastErr.Error())
 		}
-	}
-}
-
-func rerankTryChannel(
-	c *gin.Context,
-	iter *balancer.Iterator,
-	stickyKeyID int,
-	apiKeyID int,
-	requestModel string,
-	body []byte,
-) (ok, written bool, err error) {
-	item := iter.Item()
-	ctx := c.Request.Context()
-
-	channel, err := op.ChannelGet(item.ChannelID, ctx)
-	if err != nil {
-		iter.Skip(item.ChannelID, 0, fmt.Sprintf("channel_%d", item.ChannelID), fmt.Sprintf("channel not found: %v", err))
-		return false, false, err
-	}
-	if !channel.Enabled {
-		iter.Skip(channel.ID, 0, channel.Name, "channel disabled")
-		return false, false, nil
-	}
-
-	if channel.AllowEmptyKey {
-		return rerankTryOneKey(c, iter, channel, dbmodel.ChannelKey{}, item.ModelName, requestModel, body, apiKeyID)
-	}
-
-	exclude := map[int]struct{}{}
-	if iter.IsSticky() && stickyKeyID > 0 {
-		var stickyKey *dbmodel.ChannelKey
-		for i := range channel.Keys {
-			if channel.Keys[i].ID == stickyKeyID {
-				stickyKey = &channel.Keys[i]
-				break
-			}
-		}
-		if stickyKey == nil || !stickyKey.Enabled || stickyKey.ChannelKey == "" {
-			balancer.ClearSticky(apiKeyID, requestModel)
-			stickyKeyID = 0
-		} else if keymanager.IsAvailable(channel, *stickyKey, time.Now().Unix()) {
-			success, written, err := rerankTryOneKey(c, iter, channel, *stickyKey, item.ModelName, requestModel, body, apiKeyID)
-			if success || written {
-				return success, written, err
-			}
-			exclude[stickyKey.ID] = struct{}{}
-		} else {
-			exclude[stickyKey.ID] = struct{}{}
-		}
-	}
-
-	available := keymanager.ListAvailable(channel, exclude)
-	switch len(available) {
-	case 0:
-		iter.Skip(channel.ID, 0, channel.Name, "no available key")
-		return false, false, nil
-	case 1:
-		return rerankTryOneKey(c, iter, channel, available[0], item.ModelName, requestModel, body, apiKeyID)
-	default:
-		var lastErr error
-		for {
-			if ctx.Err() != nil {
-				return false, false, context.Canceled
-			}
-			if refreshed, getErr := op.ChannelGet(channel.ID, ctx); getErr == nil {
-				channel = refreshed
-			}
-			key, okSel := keymanager.Select(channel, exclude)
-			if !okSel {
-				break
-			}
-			success, written, err := rerankTryOneKey(c, iter, channel, key, item.ModelName, requestModel, body, apiKeyID)
-			if success || written {
-				return success, written, err
-			}
-			if err != nil {
-				lastErr = err
-			}
-			exclude[key.ID] = struct{}{}
-		}
-		return false, false, lastErr
 	}
 }
 

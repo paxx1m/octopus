@@ -20,6 +20,15 @@ export interface UserLoginRequest {
 export interface UserLoginResponse {
     token: string;
     expire_at: string; // ISO 8601 格式
+    must_change_password?: boolean;
+}
+
+/**
+ * 用户状态响应
+ */
+export interface UserStatusResponse {
+    username: string;
+    must_change_password: boolean;
 }
 
 /**
@@ -44,11 +53,13 @@ interface AuthState {
     isAuthenticated: boolean;
     isLoading: boolean;
     isAPIKeyAuth: boolean;
+    mustChangePassword: boolean;
     token: string | null;
     expireAt: string | null;
 
     // Actions
-    setAuth: (token: string, expireAt: string) => void;
+    setAuth: (token: string, expireAt: string, mustChangePassword?: boolean) => void;
+    setMustChangePassword: (v: boolean) => void;
     setAPIKeyAuth: (apiKey: string) => void;
     checkAuth: () => Promise<void>;
     logout: () => void;
@@ -63,23 +74,30 @@ export const useAuthStore = create<AuthState>()(
             isAuthenticated: false,
             isLoading: true,
             isAPIKeyAuth: false,
+            mustChangePassword: false,
             token: null,
             expireAt: null,
 
-            setAuth: (token: string, expireAt: string) => {
+            setAuth: (token: string, expireAt: string, mustChangePassword = false) => {
                 set({
                     isAuthenticated: true,
                     isAPIKeyAuth: false,
+                    mustChangePassword,
                     token,
                     expireAt,
                     isLoading: false
                 });
             },
 
+            setMustChangePassword: (v: boolean) => {
+                set({ mustChangePassword: v });
+            },
+
             setAPIKeyAuth: (apiKey: string) => {
                 set({
                     isAuthenticated: true,
                     isAPIKeyAuth: true,
+                    mustChangePassword: false,
                     token: apiKey,
                     expireAt: null,
                     isLoading: false
@@ -103,10 +121,17 @@ export const useAuthStore = create<AuthState>()(
                 }
 
                 try {
-                    // API Key 模式只需校验 key 是否有效即可
-                    const endpoint = isAPIKeyAuth ? '/api/v1/apikey/login' : '/api/v1/user/status';
-                    await apiClient.get<unknown>(endpoint);
-                    set({ isAuthenticated: true, isLoading: false });
+                    if (isAPIKeyAuth) {
+                        await apiClient.get<unknown>('/api/v1/apikey/login');
+                        set({ isAuthenticated: true, isLoading: false, mustChangePassword: false });
+                    } else {
+                        const status = await apiClient.get<UserStatusResponse>('/api/v1/user/status');
+                        set({
+                            isAuthenticated: true,
+                            isLoading: false,
+                            mustChangePassword: !!status.must_change_password,
+                        });
+                    }
                 } catch (error) {
                     logger.error('认证验证失败:', error);
                     get().logout();
@@ -117,6 +142,7 @@ export const useAuthStore = create<AuthState>()(
                 set({
                     isAuthenticated: false,
                     isAPIKeyAuth: false,
+                    mustChangePassword: false,
                     token: null,
                     expireAt: null,
                     isLoading: false
@@ -163,8 +189,7 @@ export function useLogin() {
             return apiClient.post<UserLoginResponse>('/api/v1/user/login', data);
         },
         onSuccess: (data) => {
-            // 保存到 zustand store
-            setAuth(data.token, data.expire_at);
+            setAuth(data.token, data.expire_at, !!data.must_change_password);
         },
         onError: (error) => {
             logger.error('登录失败:', error);
@@ -180,6 +205,7 @@ export function useLogin() {
  * changePassword.mutate({ oldPassword: '123', newPassword: '456' });
  */
 export function useChangePassword() {
+    const { setMustChangePassword } = useAuthStore();
     return useMutation({
         mutationFn: async (data: { oldPassword: string; newPassword: string }) => {
             const payload: ChangePasswordRequest = {
@@ -189,6 +215,7 @@ export function useChangePassword() {
             return apiClient.post<string>('/api/v1/user/change-password', payload);
         },
         onSuccess: (message) => {
+            setMustChangePassword(false);
             logger.log('密码修改成功:', message);
         },
         onError: (error) => {
@@ -248,6 +275,7 @@ export function useAuth() {
     return {
         isAuthenticated: store.isAuthenticated,
         isAPIKeyAuth: store.isAPIKeyAuth,
+        mustChangePassword: store.mustChangePassword,
         isLoading: store.isLoading,
         logout: store.logout,
     };

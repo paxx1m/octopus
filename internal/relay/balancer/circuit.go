@@ -201,3 +201,24 @@ func RecordFailure(channelID, keyID int, modelName string) {
 		// 但为安全起见仍更新失败时间
 	}
 }
+
+// cleanupCircuitEntries 清理长期 Closed 且无活动的熔断条目，防止 map 无界增长。
+func cleanupCircuitEntries(maxIdle time.Duration) int {
+	removed := 0
+	now := time.Now()
+	globalBreaker.Range(func(k, v any) bool {
+		entry := v.(*circuitEntry)
+		entry.mu.Lock()
+		idle := entry.State == StateClosed &&
+			entry.ConsecutiveFailures == 0 &&
+			!entry.ProbePending &&
+			(entry.LastFailureTime.IsZero() || now.Sub(entry.LastFailureTime) > maxIdle)
+		entry.mu.Unlock()
+		if idle {
+			globalBreaker.Delete(k)
+			removed++
+		}
+		return true
+	})
+	return removed
+}

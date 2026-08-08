@@ -87,7 +87,12 @@ func StatsSaveDB(ctx context.Context) error {
 	copy(pendingDaily, statsDailyPending)
 	statsDailyPendingLock.Unlock()
 
-	if err := persistStatsSnapshots(ctx, totalSnap, dailySnap, hourlyAll, channelIDs, modelIDs, apiKeyIDs, pendingDaily); err != nil {
+	statsHourlyPendingLock.Lock()
+	pendingHourly := make([]model.StatsHourly, len(statsHourlyPending))
+	copy(pendingHourly, statsHourlyPending)
+	statsHourlyPendingLock.Unlock()
+
+	if err := persistStatsSnapshots(ctx, totalSnap, dailySnap, hourlyAll, channelIDs, modelIDs, apiKeyIDs, pendingDaily, pendingHourly); err != nil {
 		remergeDirtyIDs(&statsChannelCacheNeedUpdate, &statsChannelCacheNeedUpdateLock, channelIDs)
 		remergeDirtyIDs(&statsModelCacheNeedUpdate, &statsModelCacheNeedUpdateLock, modelIDs)
 		remergeDirtyIDs(&statsAPIKeyCacheNeedUpdate, &statsAPIKeyCacheNeedUpdateLock, apiKeyIDs)
@@ -103,6 +108,15 @@ func StatsSaveDB(ctx context.Context) error {
 		}
 		statsDailyPendingLock.Unlock()
 	}
+	if len(pendingHourly) > 0 {
+		statsHourlyPendingLock.Lock()
+		if len(statsHourlyPending) >= len(pendingHourly) {
+			statsHourlyPending = statsHourlyPending[len(pendingHourly):]
+		} else {
+			statsHourlyPending = nil
+		}
+		statsHourlyPendingLock.Unlock()
+	}
 	return nil
 }
 
@@ -115,6 +129,7 @@ func persistStatsSnapshots(
 	modelIDs []int,
 	apiKeyIDs []int,
 	pendingDaily []model.StatsDaily,
+	pendingHourly []model.StatsHourly,
 ) error {
 	dbConn := db.GetDB().WithContext(ctx)
 
@@ -138,12 +153,28 @@ func persistStatsSnapshots(
 			}
 		}
 
+		// StatsHourly 主键仅 hour：跨日 pending 与今日 slot 同 hour 时，
+		// 先写 pending 再写今日，最终落库为今日；pending 主要用于进程内不丢累计路径上的 best-effort。
+		// 若需完整历史小时，应改为 (date,hour) 复合主键（后续迁移）。
 		todayDate := time.Now().Format("20060102")
-		hourlyStats := make([]model.StatsHourly, 0, 24)
+		hourlyStats := make([]model.StatsHourly, 0, 24+len(pendingHourly))
+		// 今日 slot 优先；pending 仅当该 hour 今日尚无数据时写入（避免覆盖今日）
+		todayHours := make(map[int]struct{}, 24)
 		for hour := 0; hour < 24; hour++ {
 			if hourlyAll[hour].Date == todayDate {
 				hourlyStats = append(hourlyStats, hourlyAll[hour])
+				todayHours[hour] = struct{}{}
 			}
+		}
+		for i := range pendingHourly {
+			h := pendingHourly[i]
+			if h.Date == "" || h.Hour < 0 || h.Hour >= 24 {
+				continue
+			}
+			if _, hasToday := todayHours[h.Hour]; hasToday {
+				continue
+			}
+			hourlyStats = append(hourlyStats, h)
 		}
 		if len(hourlyStats) > 0 {
 			if result := tx.Clauses(clause.OnConflict{
@@ -245,22 +276,39 @@ func StatsChannelUpdate(channelID int, metrics model.StatsMetrics) error {
 	return nil
 }
 
+var statsHourlyPending []model.StatsHourly
+var statsHourlyPendingLock sync.Mutex
+
 func StatsHourlyUpdate(metrics model.StatsMetrics) error {
 	now := time.Now()
 	nowHour := now.Hour()
-	todayDate := time.Now().Format("20060102")
+	todayDate := now.Format("20060102")
 
 	statsHourlyCacheLock.Lock()
-	defer statsHourlyCacheLock.Unlock()
-
-	if statsHourlyCache[nowHour].Date != todayDate {
+	slot := statsHourlyCache[nowHour]
+	var prev *model.StatsHourly
+	if slot.Date != "" && slot.Date != todayDate {
+		// 跨日：旧小时快照进入 pending，与 daily 对称，避免未落库数据丢失
+		cp := slot
+		prev = &cp
+		statsHourlyCache[nowHour] = model.StatsHourly{
+			Hour: nowHour,
+			Date: todayDate,
+		}
+	} else if slot.Date == "" {
 		statsHourlyCache[nowHour] = model.StatsHourly{
 			Hour: nowHour,
 			Date: todayDate,
 		}
 	}
-
 	statsHourlyCache[nowHour].StatsMetrics.Add(metrics)
+	statsHourlyCacheLock.Unlock()
+
+	if prev != nil {
+		statsHourlyPendingLock.Lock()
+		statsHourlyPending = append(statsHourlyPending, *prev)
+		statsHourlyPendingLock.Unlock()
+	}
 	return nil
 }
 

@@ -168,7 +168,7 @@ func ChannelKeySaveDB(ctx context.Context) error {
 	return channelKeyPersist(ctx, snapshotDirtyIDs(&channelKeyCacheNeedUpdate, &channelKeyCacheNeedUpdateLock))
 }
 
-// channelKeySaveDBByChannel flushes dirty keys belonging to one channel.
+// channelKeySaveDBByChannel 将指定渠道下 dirty 的 key 落库。
 func channelKeySaveDBByChannel(ctx context.Context, channelID int) error {
 	channelKeyCacheNeedUpdateLock.Lock()
 	keyIDs := make([]int, 0)
@@ -293,7 +293,7 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 		}
 	}
 
-	// rate_limit_cooldown_sec: use ClearRateLimitCooldown to distinguish "unset" vs "clear to inherit"
+	// rate_limit_cooldown_sec：用 ClearRateLimitCooldown 区分「未传」与「清空继承全局」
 	if req.ClearRateLimitCooldown {
 		if err := tx.Model(&model.Channel{}).Where("id = ?", req.ID).
 			Update("rate_limit_cooldown_sec", nil).Error; err != nil {
@@ -493,12 +493,50 @@ func ChannelLLMList(ctx context.Context) ([]model.LLMChannel, error) {
 	return models, nil
 }
 
-func ChannelGet(id int, ctx context.Context) (*model.Channel, error) {
+// ChannelGet 返回渠道的独立快照（值拷贝 + 切片深拷贝）。
+// 调用方对返回值及其 Keys/BaseUrls 等切片的修改不会影响缓存。
+func ChannelGet(id int, ctx context.Context) (model.Channel, error) {
 	channel, ok := channelCache.Get(id)
 	if !ok {
-		return nil, fmt.Errorf("channel not found")
+		return model.Channel{}, fmt.Errorf("channel not found")
 	}
-	return &channel, nil
+	return cloneChannel(channel), nil
+}
+
+// cloneChannel 深拷贝渠道中可能被共享的切片字段。
+func cloneChannel(ch model.Channel) model.Channel {
+	if len(ch.BaseUrls) > 0 {
+		cp := make([]model.BaseUrl, len(ch.BaseUrls))
+		copy(cp, ch.BaseUrls)
+		ch.BaseUrls = cp
+	}
+	if len(ch.Keys) > 0 {
+		cp := make([]model.ChannelKey, len(ch.Keys))
+		copy(cp, ch.Keys)
+		ch.Keys = cp
+	}
+	if len(ch.CustomHeader) > 0 {
+		cp := make([]model.CustomHeader, len(ch.CustomHeader))
+		copy(cp, ch.CustomHeader)
+		ch.CustomHeader = cp
+	}
+	if ch.ParamOverride != nil {
+		v := *ch.ParamOverride
+		ch.ParamOverride = &v
+	}
+	if ch.ChannelProxy != nil {
+		v := *ch.ChannelProxy
+		ch.ChannelProxy = &v
+	}
+	if ch.MatchRegex != nil {
+		v := *ch.MatchRegex
+		ch.MatchRegex = &v
+	}
+	if ch.Stats != nil {
+		s := *ch.Stats
+		ch.Stats = &s
+	}
+	return ch
 }
 
 func channelRefreshCache(ctx context.Context) error {

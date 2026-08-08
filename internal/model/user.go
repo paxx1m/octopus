@@ -7,9 +7,12 @@ import (
 )
 
 type User struct {
-	ID       uint   `gorm:"primaryKey"`
-	Username string `gorm:"unique"`
-	Password string `gorm:"not null"`
+	ID                 uint   `gorm:"primaryKey"`
+	Username           string `gorm:"unique"`
+	Password           string `gorm:"not null"`
+	MustChangePassword bool   `gorm:"not null;default:false" json:"must_change_password"`
+	// TokenVersion 在改密时递增；JWT 携带该版本，不匹配则视为失效。
+	TokenVersion int `gorm:"not null;default:0" json:"-"`
 }
 
 type UserLogin struct {
@@ -28,8 +31,14 @@ type UserChangeUsername struct {
 }
 
 type UserLoginResponse struct {
-	Token    string `json:"token"`
-	ExpireAt string `json:"expire_at"`
+	Token              string `json:"token"`
+	ExpireAt           string `json:"expire_at"`
+	MustChangePassword bool   `json:"must_change_password"`
+}
+
+type UserStatusResponse struct {
+	Username           string `json:"username"`
+	MustChangePassword bool   `json:"must_change_password"`
 }
 
 func (u *User) HashPassword() error {

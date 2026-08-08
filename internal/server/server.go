@@ -1,8 +1,10 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/conf"
 	"github.com/bestruirui/octopus/internal/relay"
@@ -17,6 +19,8 @@ import (
 )
 
 var httpSrv http.Server
+
+const maxRelayBodyBytes = 32 << 20 // 32 MiB
 
 func Start() error {
 	if conf.IsDebug() {
@@ -50,12 +54,15 @@ func Start() error {
 	return nil
 }
 
+// Close 优雅关闭 HTTP 服务，等待进行中的请求结束（最长 30s）。
 func Close() error {
-	return httpSrv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return httpSrv.Shutdown(ctx)
 }
 
 func registerRelayRoutes(r *gin.Engine) {
-	v1 := r.Group("/v1", middleware.APIKeyAuth())
+	v1 := r.Group("/v1", middleware.APIKeyAuth(), middleware.MaxBodyBytes(maxRelayBodyBytes))
 	v1.POST("/chat/completions", middleware.RequireJSON(), relay.Handler(llm.APIFormatOpenAIChatCompletion))
 	v1.POST("/responses", middleware.RequireJSON(), relay.Handler(llm.APIFormatOpenAIResponse))
 	v1.POST("/messages", middleware.RequireJSON(), relay.Handler(llm.APIFormatAnthropicMessage))

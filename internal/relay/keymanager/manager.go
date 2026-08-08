@@ -1,7 +1,7 @@
 package keymanager
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"sort"
 	"sync"
@@ -92,7 +92,7 @@ func Select(ch *model.Channel, exclude map[int]struct{}) (model.ChannelKey, bool
 	}
 	switch mode {
 	case model.KeyModeRandom:
-		return available[rand.Intn(len(available))], true
+		return available[rand.IntN(len(available))], true
 	case model.KeyModeFailover:
 		return selectFailover(available), true
 	case model.KeyModeWeighted:
@@ -156,7 +156,7 @@ func selectWeighted(keys []model.ChannelKey) model.ChannelKey {
 	if total <= 0 {
 		return keys[0]
 	}
-	r := rand.Intn(total)
+	r := rand.IntN(total)
 	for _, k := range keys {
 		r -= model.KeyWeight(k.Weight)
 		if r < 0 {
