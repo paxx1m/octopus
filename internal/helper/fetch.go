@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/dlclark/regexp2"
 	"github.com/looplj/axonhub/llm"
-	"github.com/looplj/axonhub/llm/transformer"
 )
 
 func FetchModels(ctx context.Context, request model.Channel) ([]string, error) {
@@ -64,12 +64,43 @@ func doJSON(client *http.Client, req *http.Request, dest any) error {
 	return json.NewDecoder(resp.Body).Decode(dest)
 }
 
+// modelsBaseURL builds the base URL used for model-list requests.
+// Unlike transformer.NormalizeBaseURL (always appends version for bare paths),
+// this only appends version when the URL has no path (host-only).
+// URLs that already include a path (e.g. /api/v1, /api/ollama, /api/nvidia)
+// are left as-is and only have trailing slashes trimmed.
+// A trailing "#" still forces raw mode (no version append), matching transformer convention.
+func modelsBaseURL(raw, version string) string {
+	if raw == "" {
+		return ""
+	}
+	if before, ok := strings.CutSuffix(raw, "#"); ok {
+		return strings.TrimRight(before, "/")
+	}
+	trimmed := strings.TrimRight(raw, "/")
+	if version == "" {
+		return trimmed
+	}
+	if strings.HasSuffix(trimmed, "/"+version) {
+		return trimmed
+	}
+	if strings.Contains(trimmed, "/"+version+"/") {
+		return trimmed
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Path == "" || u.Path == "/" {
+		return trimmed + "/" + version
+	}
+	return trimmed
+}
+
 // refer: https://platform.openai.com/docs/api-reference/models/list
 func fetchOpenAIModels(client *http.Client, ctx context.Context, request model.Channel) ([]string, error) {
-	baseURL := transformer.NormalizeBaseURL(request.GetBaseUrl(), "v1")
+	version := "v1"
 	if request.Type == model.ChannelTypeDoubao {
-		baseURL = transformer.NormalizeBaseURL(request.GetBaseUrl(), "v3")
+		version = "v3"
 	}
+	baseURL := modelsBaseURL(request.GetBaseUrl(), version)
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
@@ -98,11 +129,8 @@ func fetchOpenAIModels(client *http.Client, ctx context.Context, request model.C
 func fetchGeminiModels(client *http.Client, ctx context.Context, request model.Channel) ([]string, error) {
 	var allModels []string
 	pageToken := ""
-	baseURL := transformer.NormalizeBaseURL(request.GetBaseUrl(), "v1beta")
-	// Gemini transformer 会保留用户显式填写的 /v1；这里同样处理，避免把 /v1 拼成 /v1/v1beta。
-	if strings.HasSuffix(strings.TrimRight(request.GetBaseUrl(), "/"), "/v1") {
-		baseURL = transformer.NormalizeBaseURL(request.GetBaseUrl(), "")
-	}
+	// Bare host → /v1beta; path already present (incl. explicit /v1) → keep as-is.
+	baseURL := modelsBaseURL(request.GetBaseUrl(), "v1beta")
 
 	for {
 		req, err := http.NewRequestWithContext(
@@ -147,7 +175,7 @@ func fetchGeminiModels(client *http.Client, ctx context.Context, request model.C
 func fetchAnthropicModels(client *http.Client, ctx context.Context, request model.Channel) ([]string, error) {
 	var allModels []string
 	var afterID string
-	baseURL := transformer.NormalizeBaseURL(request.GetBaseUrl(), "v1")
+	baseURL := modelsBaseURL(request.GetBaseUrl(), "v1")
 	for {
 		req, err := http.NewRequestWithContext(
 			ctx,
