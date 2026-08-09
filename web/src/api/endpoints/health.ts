@@ -72,25 +72,14 @@ export interface HealthSnapshot {
     ts: number;
 }
 
-export type HealthListParams = {
+export type HealthFilterParams = {
     groupId?: number;
     abnormalOnly?: boolean;
 };
 
-function buildListQuery(params: HealthListParams): string {
-    const q = new URLSearchParams();
-    if (params.groupId && params.groupId > 0) {
-        q.set('group_id', String(params.groupId));
-    }
-    q.set('abnormal_only', params.abnormalOnly === false ? '0' : '1');
-    return q.toString();
-}
-
-async function fetchHealthList(params: HealthListParams): Promise<HealthSnapshot> {
-    const qs = buildListQuery(params);
-    const data = await apiClient.get<HealthSnapshot>(`/api/v1/health/list?${qs}`);
-    return data ?? { summary: emptySummary(), channels: [], ts: 0 };
-}
+/** Full snapshot query — no server-side filter; filtering is client-side. */
+const FULL_LIST_QS = 'abnormal_only=0';
+export const healthListQueryKey = ['health', 'list', 'full'] as const;
 
 function emptySummary(): HealthSummary {
     return {
@@ -103,6 +92,11 @@ function emptySummary(): HealthSummary {
         degraded: 0,
         ok: 0,
     };
+}
+
+async function fetchHealthListFull(): Promise<HealthSnapshot> {
+    const data = await apiClient.get<HealthSnapshot>(`/api/v1/health/list?${FULL_LIST_QS}`);
+    return data ?? { summary: emptySummary(), channels: [], ts: 0 };
 }
 
 /** Recompute remaining_sec from cooldown_until using local clock. */
@@ -137,10 +131,72 @@ export function formatRemaining(sec: number): string {
     return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+function channelInGroup(ch: HealthChannel, groupId: number): boolean {
+    if (!groupId) return true;
+    return (ch.group_ids ?? []).includes(groupId);
+}
+
+/** Build summary from a channel list (after group filter; before abnormal-only list trim). */
+export function summarizeChannels(channels: HealthChannel[]): HealthSummary {
+    const summary = emptySummary();
+    summary.channels_total = channels.length;
+    for (const ch of channels) {
+        switch (ch.status) {
+            case 'disabled':
+                summary.disabled++;
+                summary.channels_abnormal++;
+                break;
+            case 'circuit_open':
+                summary.circuit_open++;
+                summary.channels_abnormal++;
+                break;
+            case 'rate_limited':
+                summary.rate_limited++;
+                summary.channels_abnormal++;
+                break;
+            case 'circuit_half_open':
+                summary.half_open++;
+                summary.channels_abnormal++;
+                break;
+            case 'degraded':
+                summary.degraded++;
+                summary.channels_abnormal++;
+                break;
+            default:
+                summary.ok++;
+                break;
+        }
+    }
+    return summary;
+}
+
+export function filterHealthChannels(
+    channels: HealthChannel[],
+    params: HealthFilterParams & { search?: string }
+): { channels: HealthChannel[]; summary: HealthSummary } {
+    const groupId = params.groupId ?? 0;
+    const abnormalOnly = params.abnormalOnly !== false;
+    const q = (params.search ?? '').trim().toLowerCase();
+
+    const inGroup = channels.filter((ch) => channelInGroup(ch, groupId));
+    const summary = summarizeChannels(inGroup);
+
+    let list = inGroup;
+    if (abnormalOnly) {
+        list = list.filter((ch) => ch.status !== 'ok');
+    }
+    if (q) {
+        list = list.filter((ch) => ch.name.toLowerCase().includes(q));
+    }
+
+    return { channels: list, summary };
+}
+
 /**
- * Health panel data: initial list + SSE live snapshots + local 1s countdown tick.
+ * Health panel: one full snapshot stream + client-side filters.
+ * Switching group / abnormal-only does NOT reconnect SSE.
  */
-export function useHealth(params: HealthListParams = {}) {
+export function useHealth(params: HealthFilterParams = {}) {
     const { groupId, abnormalOnly = true } = params;
     const [snapshot, setSnapshot] = useState<HealthSnapshot | null>(null);
     const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
@@ -152,29 +208,22 @@ export function useHealth(params: HealthListParams = {}) {
     const cancelledRef = useRef(false);
 
     const listQuery = useQuery({
-        queryKey: ['health', 'list', groupId ?? 0, abnormalOnly],
-        queryFn: () => fetchHealthList({ groupId, abnormalOnly }),
+        queryKey: healthListQueryKey,
+        queryFn: fetchHealthListFull,
         staleTime: Infinity,
         refetchOnMount: 'always',
         refetchOnWindowFocus: false,
     });
 
-    // Seed from HTTP list only when filter changes or first load — do not clobber newer SSE snapshots.
-    useEffect(() => {
-        setSnapshot(null);
-    }, [groupId, abnormalOnly]);
-
     useEffect(() => {
         if (!listQuery.data) return;
         setSnapshot((prev) => {
             if (!prev) return listQuery.data;
-            // Prefer fresher SSE/resync data
             if ((listQuery.data.ts ?? 0) >= (prev.ts ?? 0)) return listQuery.data;
             return prev;
         });
     }, [listQuery.data]);
 
-    // local countdown tick
     useEffect(() => {
         const id = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 1000);
         return () => clearInterval(id);
@@ -186,16 +235,15 @@ export function useHealth(params: HealthListParams = {}) {
             const { token } = await apiClient.get<{ token: string }>('/api/v1/health/stream-token');
             if (cancelledRef.current) return;
 
-            // Drop any previous connection before opening a new one
             if (eventSourceRef.current) {
                 eventSourceRef.current.onerror = null;
                 eventSourceRef.current.close();
                 eventSourceRef.current = null;
             }
 
-            const qs = buildListQuery({ groupId, abnormalOnly });
+            // Always full snapshot — filters applied client-side so SSE stays open
             const eventSource = new EventSource(
-                `${API_BASE_URL}/api/v1/health/stream?token=${token}&${qs}`
+                `${API_BASE_URL}/api/v1/health/stream?token=${token}&${FULL_LIST_QS}`
             );
             eventSourceRef.current = eventSource;
 
@@ -217,10 +265,8 @@ export function useHealth(params: HealthListParams = {}) {
             };
 
             eventSource.addEventListener('snapshot', onSnapshot);
-            // ignore default onmessage — server always uses event: snapshot | ping
 
             eventSource.onerror = () => {
-                // Stale instance after unmount / reconnect / filter change
                 if (eventSourceRef.current !== eventSource) return;
 
                 setIsConnected(false);
@@ -250,7 +296,7 @@ export function useHealth(params: HealthListParams = {}) {
                 void connect();
             }, delay);
         }
-    }, [groupId, abnormalOnly]);
+    }, []);
 
     useEffect(() => {
         cancelledRef.current = false;
@@ -276,10 +322,17 @@ export function useHealth(params: HealthListParams = {}) {
         return withLiveCountdowns(snapshot, nowSec);
     }, [snapshot, nowSec]);
 
+    const filtered = useMemo(() => {
+        return filterHealthChannels(live?.channels ?? [], {
+            groupId,
+            abnormalOnly,
+        });
+    }, [live, groupId, abnormalOnly]);
+
     return {
         snapshot: live,
-        summary: live?.summary ?? emptySummary(),
-        channels: live?.channels ?? [],
+        summary: filtered.summary,
+        channels: filtered.channels,
         isLoading: listQuery.isLoading && !snapshot,
         isConnected,
         streamError,

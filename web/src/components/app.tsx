@@ -132,8 +132,8 @@ export function AppContainer() {
                         case 'health': {
                             prefetches.push(
                                 queryClient.prefetchQuery({
-                                    queryKey: ['health', 'list', 0, true],
-                                    queryFn: async () => apiClient.get('/api/v1/health/list?abnormal_only=1'),
+                                    queryKey: ['health', 'list', 'full'],
+                                    queryFn: async () => apiClient.get('/api/v1/health/list?abnormal_only=0'),
                                 })
                             );
                             prefetches.push(

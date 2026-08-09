@@ -7,6 +7,13 @@ import { useTranslations } from 'use-intl';
 import { Loader2, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 
 export function Health() {
     const t = useTranslations('health');
@@ -26,9 +33,13 @@ export function Health() {
         return channels.filter((c) => c.name.toLowerCase().includes(q));
     }, [channels, search]);
 
+    const summaryText = t('summaryLine', {
+        abnormal: summary.channels_abnormal,
+        total: summary.channels_total,
+    });
+
     return (
         <PageWrapper className="h-full min-h-0 space-y-4 overflow-y-auto overscroll-contain rounded-t-3xl pb-24 scrollbar-none md:pb-4">
-            {/* summary + connection */}
             <div className="rounded-3xl border border-border bg-card p-4 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
@@ -52,11 +63,8 @@ export function Health() {
                             <span className="text-xs text-orange-600 dark:text-orange-400">{t('reconnecting')}</span>
                         ) : null}
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                        {t('summaryLine', {
-                            abnormal: summary.channels_abnormal,
-                            total: summary.channels_total,
-                        })}
+                    <div className="text-xs text-muted-foreground tabular-nums">
+                        {summaryText}
                     </div>
                 </div>
 
@@ -76,18 +84,26 @@ export function Health() {
                         placeholder={t('searchPlaceholder')}
                         className="h-8 max-w-xs rounded-xl text-sm"
                     />
-                    <select
-                        value={groupId}
-                        onChange={(e) => setGroupId(Number(e.target.value) || 0)}
-                        className="h-8 rounded-xl border border-border bg-background px-2 text-sm"
+                    <Select
+                        value={String(groupId)}
+                        onValueChange={(v) => setGroupId(Number(v) || 0)}
                     >
-                        <option value={0}>{t('allGroups')}</option>
-                        {(groups ?? []).map((g) => (
-                            <option key={g.id ?? g.name} value={g.id ?? 0}>
-                                {g.name}
-                            </option>
-                        ))}
-                    </select>
+                        <SelectTrigger size="sm" className="w-40 rounded-xl">
+                            <SelectValue placeholder={t('allGroups')} />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-xl">
+                            <SelectItem value="0" className="rounded-xl">
+                                {t('allGroups')}
+                            </SelectItem>
+                            {(groups ?? []).map((g) =>
+                                g.id != null ? (
+                                    <SelectItem key={g.id} value={String(g.id)} className="rounded-xl">
+                                        {g.name}
+                                    </SelectItem>
+                                ) : null
+                            )}
+                        </SelectContent>
+                    </Select>
                     <div className="inline-flex rounded-xl border border-border overflow-hidden text-xs">
                         <button
                             type="button"
