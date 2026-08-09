@@ -188,26 +188,39 @@ func OnResult(ch *model.Channel, key model.ChannelKey, statusCode int, costDelta
 		return
 	}
 	now := time.Now().Unix()
+	notify := false
 
 	switch statusCode {
 	case http.StatusUnauthorized, http.StatusForbidden:
 		if err := op.ChannelKeySetEnabled(key.ID, ch.ID, false); err != nil {
 			log.Warnf("failed to disable channel key %d after %d: %v", key.ID, statusCode, err)
+			// SetEnabled failed — still try status update + notify
+			_ = op.ChannelKeyApplyUpdate(key.ID, ch.ID, statusCode, now, 0)
+			notify = true
 		} else {
 			log.Warnf("channel key %d disabled after HTTP %d", key.ID, statusCode)
+			_ = op.ChannelKeyApplyUpdate(key.ID, ch.ID, statusCode, now, 0)
+			// ChannelKeySetEnabled already HealthNotify'd
 		}
-		_ = op.ChannelKeyApplyUpdate(key.ID, ch.ID, statusCode, now, 0)
-		return
 	case http.StatusTooManyRequests:
 		// 软冷却：不删 Key、不改 Enabled；仅靠时间窗屏蔽，到期自动恢复可选。
 		_ = op.ChannelKeyApplyUpdate(key.ID, ch.ID, statusCode, now, 0)
-		return
+		notify = true
+	default:
+		if statusCode >= 200 && statusCode < 300 {
+			prev := key.StatusCode
+			_ = op.ChannelKeyApplyUpdate(key.ID, ch.ID, statusCode, now, costDelta)
+			// recovery from 429 / error codes should refresh health panel
+			if prev == http.StatusTooManyRequests || (prev >= 400 && prev != statusCode) {
+				notify = true
+			}
+		} else {
+			_ = op.ChannelKeyApplyUpdate(key.ID, ch.ID, statusCode, now, 0)
+			// surface non-2xx last status without necessarily changing availability
+		}
 	}
 
-	if statusCode >= 200 && statusCode < 300 {
-		_ = op.ChannelKeyApplyUpdate(key.ID, ch.ID, statusCode, now, costDelta)
-		return
+	if notify {
+		op.HealthNotify()
 	}
-
-	_ = op.ChannelKeyApplyUpdate(key.ID, ch.ID, statusCode, now, 0)
 }

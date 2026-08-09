@@ -42,6 +42,7 @@ func ChannelCreate(channel *model.Channel, ctx context.Context) error {
 			channelKeyCache.Set(k.ID, k)
 		}
 	}
+	HealthNotify()
 	return nil
 }
 
@@ -82,6 +83,7 @@ func ChannelKeySetEnabled(keyID, channelID int, enabled bool) error {
 		k.Enabled = enabled
 		channelKeyCache.Set(keyID, k)
 	}
+	HealthNotify()
 	return nil
 }
 
@@ -382,6 +384,7 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 	}
 
 	channel, _ := channelCache.Get(req.ID)
+	HealthNotify()
 	return &channel, nil
 }
 
@@ -399,6 +402,7 @@ func ChannelEnabled(id int, enabled bool, ctx context.Context) error {
 	}
 	oldChannel.Enabled = enabled
 	channelCache.Set(id, oldChannel)
+	HealthNotify()
 	return nil
 }
 
@@ -463,6 +467,8 @@ func ChannelDel(id int, ctx context.Context) error {
 		}
 	}
 	StatsChannelDel(id)
+
+	HealthNotify()
 
 	// 刷新受影响的分组缓存
 	for _, groupID := range affectedGroupIDs {

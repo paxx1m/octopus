@@ -53,6 +53,7 @@
         "home": "Home",
         "channel": "Channel",
         "group": "Group",
+        "health": "Health",
         "key": "Key",
         "model": "Price",
         "log": "Log",
@@ -597,6 +598,33 @@
             "bulkKeysApplied": "Added {count} key(s)",
             "singleKeyHint": "Need many keys? Use Bulk import. Optional: key|remark|weight|cooldown",
             "keyAdvanced": "More options"
+        }
+    },
+    "health": {
+        "title": "Channel Health",
+        "connected": "Live",
+        "disconnected": "Offline",
+        "reconnecting": "Reconnecting…",
+        "summaryLine": "{abnormal} abnormal / {total} channels",
+        "searchPlaceholder": "Search channel…",
+        "allGroups": "All groups",
+        "filterAbnormal": "Abnormal",
+        "filterAll": "All",
+        "emptyAbnormal": "No abnormal channels",
+        "emptyAll": "No channels",
+        "keysAvailable": "{available}/{total} keys available",
+        "emptyKeyMode": "No key required",
+        "emptyKey": "(empty key)",
+        "channelDisabled": "Channel off",
+        "probing": "Probing",
+        "failures": "{count} failures",
+        "status": {
+            "disabled": "Disabled",
+            "circuit_open": "Circuit open",
+            "rate_limited": "429 cooldown",
+            "circuit_half_open": "Half-open",
+            "degraded": "Degraded",
+            "ok": "OK"
         }
     }
 }

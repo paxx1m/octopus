@@ -53,6 +53,7 @@
         "home": "主页",
         "channel": "渠道",
         "group": "分组",
+        "health": "健康",
         "key": "密钥",
         "model": "价格",
         "log": "日志",
@@ -597,6 +598,33 @@
             "bulkKeysApplied": "已添加 {count} 个 Key",
             "singleKeyHint": "多个 Key 请用「批量导入」。也可写 key|备注|权重|冷却",
             "keyAdvanced": "更多选项"
+        }
+    },
+    "health": {
+        "title": "渠道健康",
+        "connected": "实时",
+        "disconnected": "未连接",
+        "reconnecting": "重连中…",
+        "summaryLine": "{abnormal} 异常 / {total} 渠道",
+        "searchPlaceholder": "搜索渠道…",
+        "allGroups": "全部分组",
+        "filterAbnormal": "仅异常",
+        "filterAll": "全部",
+        "emptyAbnormal": "当前没有异常渠道",
+        "emptyAll": "暂无渠道",
+        "keysAvailable": "可用 Key {available}/{total}",
+        "emptyKeyMode": "无需 Key",
+        "emptyKey": "(空 Key)",
+        "channelDisabled": "渠道已关闭",
+        "probing": "探测中",
+        "failures": "连续失败 {count}",
+        "status": {
+            "disabled": "不可用",
+            "circuit_open": "熔断",
+            "rate_limited": "429 冷却",
+            "circuit_half_open": "半开",
+            "degraded": "降级",
+            "ok": "正常"
         }
     }
 }

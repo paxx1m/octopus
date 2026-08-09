@@ -2,6 +2,8 @@ package balancer
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -95,12 +97,15 @@ func IsTripped(channelID, keyID int, modelName string) (tripped bool, remaining 
 	entry := v.(*circuitEntry)
 
 	entry.mu.Lock()
-	defer entry.mu.Unlock()
-
+	var (
+		outTripped bool
+		outRem     time.Duration
+		outProbe   bool
+		notify     bool
+	)
 	switch entry.State {
 	case StateClosed:
-		return false, 0, false
-
+		// defaults: not tripped
 	case StateOpen:
 		cooldown := GetCooldown(entry.TripCount)
 		elapsed := time.Since(entry.LastFailureTime)
@@ -108,18 +113,21 @@ func IsTripped(channelID, keyID int, modelName string) (tripped bool, remaining 
 			entry.State = StateHalfOpen
 			entry.ProbePending = true
 			log.Infof("circuit breaker [%s] Open -> HalfOpen (cooldown %v elapsed)", key, cooldown)
-			return false, 0, true
+			outProbe = true
+			notify = true
+		} else {
+			outTripped = true
+			outRem = cooldown - elapsed
 		}
-		// 仍在冷却中
-		return true, cooldown - elapsed, false
-
 	case StateHalfOpen:
 		// 已有试探请求在进行中，拒绝其他请求
-		return true, 0, false
-
-	default:
-		return false, 0, false
+		outTripped = true
 	}
+	entry.mu.Unlock()
+	if notify {
+		op.HealthNotify()
+	}
+	return outTripped, outRem, outProbe
 }
 
 // RecordProbeAborted 探测请求在真正转发前被跳过（无 key、disabled、adapter 失败等），
@@ -133,13 +141,17 @@ func RecordProbeAborted(channelID, keyID int, modelName string) {
 	entry := v.(*circuitEntry)
 
 	entry.mu.Lock()
-	defer entry.mu.Unlock()
-
+	changed := false
 	if entry.State == StateHalfOpen && entry.ProbePending {
 		entry.State = StateOpen
 		entry.ProbePending = false
 		entry.LastFailureTime = time.Now()
 		log.Warnf("circuit breaker [%s] HalfOpen -> Open (probe aborted before forward)", key)
+		changed = true
+	}
+	entry.mu.Unlock()
+	if changed {
+		op.HealthNotify()
 	}
 }
 
@@ -153,8 +165,8 @@ func RecordSuccess(channelID, keyID int, modelName string) {
 	entry := v.(*circuitEntry)
 
 	entry.mu.Lock()
-	defer entry.mu.Unlock()
-
+	prev := entry.State
+	prevFailures := entry.ConsecutiveFailures
 	if entry.State == StateHalfOpen {
 		log.Infof("circuit breaker [%s] HalfOpen -> Closed (probe succeeded)", key)
 	}
@@ -164,6 +176,11 @@ func RecordSuccess(channelID, keyID int, modelName string) {
 	entry.ConsecutiveFailures = 0
 	entry.TripCount = 0
 	entry.ProbePending = false
+	changed := prev != StateClosed || prevFailures > 0
+	entry.mu.Unlock()
+	if changed {
+		op.HealthNotify()
+	}
 }
 
 // RecordFailure 记录失败，可能触发熔断
@@ -172,10 +189,9 @@ func RecordFailure(channelID, keyID int, modelName string) {
 	entry := getOrCreateEntry(key)
 
 	entry.mu.Lock()
-	defer entry.mu.Unlock()
-
 	entry.LastFailureTime = time.Now()
 	entry.ProbePending = false
+	notify := false
 
 	switch entry.State {
 	case StateClosed:
@@ -186,7 +202,9 @@ func RecordFailure(channelID, keyID int, modelName string) {
 			entry.TripCount++
 			log.Warnf("circuit breaker [%s] Closed -> Open (failures=%d >= threshold=%d, tripCount=%d, cooldown=%v)",
 				key, entry.ConsecutiveFailures, threshold, entry.TripCount, GetCooldown(entry.TripCount))
+			notify = true
 		}
+		// degraded (failures < threshold): no notify — 30s SSE resync is enough
 
 	case StateHalfOpen:
 		// 试探失败，重新进入 Open 状态，TripCount 递增（冷却时间翻倍）
@@ -195,11 +213,106 @@ func RecordFailure(channelID, keyID int, modelName string) {
 		entry.ConsecutiveFailures = 0 // 重新开始计数
 		log.Warnf("circuit breaker [%s] HalfOpen -> Open (probe failed, tripCount=%d, cooldown=%v)",
 			key, entry.TripCount, GetCooldown(entry.TripCount))
+		notify = true
 
 	case StateOpen:
 		// 理论上不应该在 Open 状态下接收到失败记录（请求应被拒绝），
 		// 但为安全起见仍更新失败时间
 	}
+	entry.mu.Unlock()
+	if notify {
+		op.HealthNotify()
+	}
+}
+
+// CircuitSnapshot 熔断器只读快照（不迁移状态）。
+type CircuitSnapshot struct {
+	ChannelID           int    `json:"channel_id"`
+	KeyID               int    `json:"key_id"`
+	ModelName           string `json:"model_name"`
+	State               string `json:"state"` // closed | open | half_open
+	ConsecutiveFailures int64  `json:"consecutive_failures"`
+	TripCount           int    `json:"trip_count"`
+	LastFailureUnix     int64  `json:"last_failure_unix"`
+	CooldownUntil       int64  `json:"cooldown_until"`
+	RemainingSec        int    `json:"remaining_sec"`
+	ProbePending        bool   `json:"probe_pending"`
+}
+
+func circuitStateString(s CircuitState) string {
+	switch s {
+	case StateOpen:
+		return "open"
+	case StateHalfOpen:
+		return "half_open"
+	default:
+		return "closed"
+	}
+}
+
+// ListCircuits 返回熔断条目只读快照。
+// onlyActive=true 时仅返回 Open / HalfOpen，或 Closed 但仍有连续失败计数的条目。
+// 本函数不修改状态（不会触发 Open→HalfOpen）。
+func ListCircuits(onlyActive bool) []CircuitSnapshot {
+	now := time.Now()
+	out := make([]CircuitSnapshot, 0, 16)
+	globalBreaker.Range(func(k, v any) bool {
+		key, _ := k.(string)
+		entry := v.(*circuitEntry)
+		entry.mu.Lock()
+		state := entry.State
+		failures := entry.ConsecutiveFailures
+		tripCount := entry.TripCount
+		lastFail := entry.LastFailureTime
+		probePending := entry.ProbePending
+		entry.mu.Unlock()
+
+		if onlyActive {
+			if state == StateClosed && failures == 0 {
+				return true
+			}
+		}
+
+		channelID, keyID, modelName := parseCircuitKey(key)
+
+		snap := CircuitSnapshot{
+			ChannelID:           channelID,
+			KeyID:               keyID,
+			ModelName:           modelName,
+			State:               circuitStateString(state),
+			ConsecutiveFailures: failures,
+			TripCount:           tripCount,
+			ProbePending:        probePending,
+		}
+		if !lastFail.IsZero() {
+			snap.LastFailureUnix = lastFail.Unix()
+		}
+		if state == StateOpen {
+			cooldown := GetCooldown(tripCount)
+			until := lastFail.Add(cooldown)
+			snap.CooldownUntil = until.Unix()
+			rem := int(until.Sub(now).Seconds())
+			if rem < 0 {
+				rem = 0
+			}
+			snap.RemainingSec = rem
+		}
+		out = append(out, snap)
+		return true
+	})
+	return out
+}
+
+func parseCircuitKey(key string) (channelID, keyID int, modelName string) {
+	// key format: "{channelID}:{keyID}:{modelName}"；modelName 可含冒号
+	parts := strings.SplitN(key, ":", 3)
+	if len(parts) < 3 {
+		return 0, 0, key
+	}
+	channelID, _ = strconv.Atoi(parts[0])
+	keyID, _ = strconv.Atoi(parts[1])
+	modelName = parts[2]
+	return channelID, keyID, modelName
 }
 
 // cleanupCircuitEntries 清理长期 Closed 且无活动的熔断条目，防止 map 无界增长。

@@ -129,6 +129,21 @@ export function AppContainer() {
                             );
                             break;
                         }
+                        case 'health': {
+                            prefetches.push(
+                                queryClient.prefetchQuery({
+                                    queryKey: ['health', 'list', 0, true],
+                                    queryFn: async () => apiClient.get('/api/v1/health/list?abnormal_only=1'),
+                                })
+                            );
+                            prefetches.push(
+                                queryClient.prefetchQuery({
+                                    queryKey: ['groups', 'list'],
+                                    queryFn: async () => apiClient.get('/api/v1/group/list'),
+                                })
+                            );
+                            break;
+                        }
                         case 'model': {
                             prefetches.push(
                                 queryClient.prefetchQuery({

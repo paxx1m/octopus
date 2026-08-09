@@ -53,6 +53,7 @@
         "home": "主頁",
         "channel": "供應源",
         "group": "分組",
+        "health": "健康",
         "key": "金鑰",
         "model": "價格",
         "log": "日誌",
@@ -597,6 +598,33 @@
             "bulkKeysApplied": "已新增 {count} 個 Key",
             "singleKeyHint": "多個 Key 請用「批次匯入」。也可寫 key|備註|權重|冷卻",
             "keyAdvanced": "更多選項"
+        }
+    },
+    "health": {
+        "title": "供應源健康",
+        "connected": "即時",
+        "disconnected": "未連線",
+        "reconnecting": "重連中…",
+        "summaryLine": "{abnormal} 異常 / {total} 供應源",
+        "searchPlaceholder": "搜尋供應源…",
+        "allGroups": "全部分組",
+        "filterAbnormal": "僅異常",
+        "filterAll": "全部",
+        "emptyAbnormal": "目前沒有異常供應源",
+        "emptyAll": "暫無供應源",
+        "keysAvailable": "可用金鑰 {available}/{total}",
+        "emptyKeyMode": "無需金鑰",
+        "emptyKey": "(空金鑰)",
+        "channelDisabled": "供應源已關閉",
+        "probing": "探測中",
+        "failures": "連續失敗 {count}",
+        "status": {
+            "disabled": "不可用",
+            "circuit_open": "熔斷",
+            "rate_limited": "429 冷卻",
+            "circuit_half_open": "半開",
+            "degraded": "降級",
+            "ok": "正常"
         }
     }
 }
