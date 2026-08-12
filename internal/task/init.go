@@ -12,11 +12,8 @@ import (
 )
 
 const (
-	TaskPriceUpdate    = "price_update"
 	TaskStatsSave      = "stats_save"
 	TaskRelayLogSave   = "relay_log_save"
-	TaskSyncLLM        = "sync_llm"
-	TaskCleanLLM       = "clean_llm"
 	TaskBaseUrlDelay   = "base_url_delay"
 	TaskRuntimeCleanup = "runtime_cleanup"
 )

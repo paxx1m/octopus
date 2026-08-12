@@ -2,8 +2,6 @@ package op
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"sync"
 	"time"
 
@@ -22,60 +20,29 @@ var relayLogCacheLock sync.Mutex
 
 var relayLogFlushLock sync.Mutex
 
-var relayLogSubscribers = make(map[chan model.RelayLog]struct{})
-var relayLogSubscribersLock sync.RWMutex
-
 const relayLogStreamTokenTTL = 5 * time.Minute
 
-type streamTokenEntry struct {
-	expiresAt time.Time
-}
-
-var relayLogStreamTokens = make(map[string]streamTokenEntry)
-var relayLogStreamTokensLock sync.RWMutex
-
-func purgeExpiredStreamTokens() {
-	now := time.Now()
-	for t, e := range relayLogStreamTokens {
-		if now.After(e.expiresAt) {
-			delete(relayLogStreamTokens, t)
-		}
-	}
-}
+// relayLogHub 管理日志 SSE 的 stream-token 与订阅通知（负载为日志条目）。
+var relayLogHub = newSSEHub[model.RelayLog](relayLogStreamTokenTTL, 10)
 
 func RelayLogStreamTokenCreate() (string, error) {
-	bytes := make([]byte, 32)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	token := hex.EncodeToString(bytes)
-
-	relayLogStreamTokensLock.Lock()
-	purgeExpiredStreamTokens()
-	relayLogStreamTokens[token] = streamTokenEntry{expiresAt: time.Now().Add(relayLogStreamTokenTTL)}
-	relayLogStreamTokensLock.Unlock()
-
-	return token, nil
+	return relayLogHub.TokenCreate()
 }
 
 func RelayLogStreamTokenVerify(token string) bool {
-	relayLogStreamTokensLock.Lock()
-	defer relayLogStreamTokensLock.Unlock()
-	e, ok := relayLogStreamTokens[token]
-	if !ok {
-		return false
-	}
-	if time.Now().After(e.expiresAt) {
-		delete(relayLogStreamTokens, token)
-		return false
-	}
-	return true
+	return relayLogHub.TokenVerify(token)
 }
 
 func RelayLogStreamTokenRevoke(token string) {
-	relayLogStreamTokensLock.Lock()
-	delete(relayLogStreamTokens, token)
-	relayLogStreamTokensLock.Unlock()
+	relayLogHub.TokenRevoke(token)
+}
+
+func RelayLogSubscribe() chan model.RelayLog {
+	return relayLogHub.Subscribe()
+}
+
+func RelayLogUnsubscribe(ch chan model.RelayLog) {
+	relayLogHub.Unsubscribe(ch)
 }
 
 func truncateLogContent(s string) string {
@@ -85,31 +52,15 @@ func truncateLogContent(s string) string {
 	return s[:model.RelayLogContentMaxLen] + "...[truncated]"
 }
 
-func RelayLogSubscribe() chan model.RelayLog {
-	ch := make(chan model.RelayLog, 10)
-	relayLogSubscribersLock.Lock()
-	relayLogSubscribers[ch] = struct{}{}
-	relayLogSubscribersLock.Unlock()
-	return ch
-}
-
-func RelayLogUnsubscribe(ch chan model.RelayLog) {
-	relayLogSubscribersLock.Lock()
-	delete(relayLogSubscribers, ch)
-	relayLogSubscribersLock.Unlock()
-	close(ch)
-}
-
-func notifySubscribers(relayLog model.RelayLog) {
-	relayLogSubscribersLock.RLock()
-	defer relayLogSubscribersLock.RUnlock()
-
-	for ch := range relayLogSubscribers {
-		select {
-		case ch <- relayLog:
-		default:
-		}
+// trimRelayLogCache 保留最近 keep 条日志，丢弃更旧的。
+// 重建底层数组而不是 reslice，避免数组持续引用旧日志的 Request/ResponseContent 导致内存无法回收。
+func trimRelayLogCache(keep int) {
+	if len(relayLogCache) <= keep {
+		return
 	}
+	newCache := make([]model.RelayLog, keep, relayLogMaxSizeNoDB)
+	copy(newCache, relayLogCache[len(relayLogCache)-keep:])
+	relayLogCache = newCache
 }
 
 func relayLogFlushToDB(ctx context.Context) error {
@@ -128,6 +79,11 @@ func relayLogFlushToDB(ctx context.Context) error {
 
 	result := db.GetDB().WithContext(ctx).Create(&batch)
 	if result.Error != nil {
+		// 失败时裁剪缓存：保留最近一批，避免 DB 故障期间缓存随请求数无界增长，
+		// 也避免每次失败 flush 都全量拷贝 O(n²)。
+		relayLogCacheLock.Lock()
+		trimRelayLogCache(relayLogMaxSize)
+		relayLogCacheLock.Unlock()
 		return result.Error
 	}
 
@@ -159,11 +115,8 @@ func RelayLogAdd(ctx context.Context, relayLog model.RelayLog) error {
 	relayLog.ResponseContent = truncateLogContent(relayLog.ResponseContent)
 
 	// 无订阅者时跳过 goroutine 开销（relay 路径每请求一次）
-	relayLogSubscribersLock.RLock()
-	hasSubscribers := len(relayLogSubscribers) > 0
-	relayLogSubscribersLock.RUnlock()
-	if hasSubscribers {
-		go notifySubscribers(relayLog)
+	if relayLogHub.HasSubscribers() {
+		go relayLogHub.Notify(relayLog)
 	}
 
 	relayLogCacheLock.Lock()
@@ -181,13 +134,7 @@ func RelayLogAdd(ctx context.Context, relayLog model.RelayLog) error {
 			return nil
 		}
 		// 如果未启用日志保存，移除最旧的日志，保留最新的日志用于实时查询
-		// 重建底层数组而不是 reslice，避免数组持续引用旧日志的 Request/ResponseContent 导致内存无法回收
-		keepSize := maxSize / 2
-		if len(relayLogCache) > keepSize {
-			newCache := make([]model.RelayLog, keepSize, maxSize)
-			copy(newCache, relayLogCache[len(relayLogCache)-keepSize:])
-			relayLogCache = newCache
-		}
+		trimRelayLogCache(maxSize / 2)
 	}
 	relayLogCacheLock.Unlock()
 	return nil
@@ -213,12 +160,7 @@ func RelayLogSaveDBTask(ctx context.Context) error {
 
 	// 如果未启用日志保存，检查缓存大小，如果超过限制则清理旧日志
 	relayLogCacheLock.Lock()
-	if len(relayLogCache) > relayLogMaxSizeNoDB {
-		keepSize := relayLogMaxSizeNoDB / 2
-		newCache := make([]model.RelayLog, keepSize, relayLogMaxSizeNoDB)
-		copy(newCache, relayLogCache[len(relayLogCache)-keepSize:])
-		relayLogCache = newCache
-	}
+	trimRelayLogCache(relayLogMaxSizeNoDB / 2)
 	relayLogCacheLock.Unlock()
 
 	return nil
@@ -294,6 +236,15 @@ func RelayLogList(ctx context.Context, startTime, endTime *int, page, pageSize i
 			query := db.GetDB().WithContext(ctx)
 			if hasTimeFilter {
 				query = query.Where("time >= ? AND time <= ?", *startTime, *endTime)
+			}
+			// 排除仍在缓存中的日志：缓存 flush 后这些日志也进了 DB，
+			// 不排除会与已返回的缓存页重复。
+			if len(cachedLogs) > 0 {
+				cachedIDs := make([]int64, 0, len(cachedLogs))
+				for _, l := range cachedLogs {
+					cachedIDs = append(cachedIDs, l.ID)
+				}
+				query = query.Where("id NOT IN ?", cachedIDs)
 			}
 
 			var dbLogs []model.RelayLog

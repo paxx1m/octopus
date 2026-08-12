@@ -137,7 +137,7 @@ export function SettingSystem() {
                 <Input
                     value={proxyUrl}
                     onChange={(e) => setProxyUrl(e.target.value)}
-                    onBlur={() => handleSave('proxy_url', proxyUrl, initialProxyUrl.current)}
+                    onBlur={() => handleSave(SettingKey.ProxyURL, proxyUrl, initialProxyUrl.current)}
                     placeholder={t('proxyUrl.placeholder')}
                     className="w-48 rounded-xl"
                 />
@@ -153,7 +153,7 @@ export function SettingSystem() {
                     type="number"
                     value={statsSaveInterval}
                     onChange={(e) => setStatsSaveInterval(e.target.value)}
-                    onBlur={() => handleSave('stats_save_interval', statsSaveInterval, initialStatsSaveInterval.current)}
+                    onBlur={() => handleSave(SettingKey.StatsSaveInterval, statsSaveInterval, initialStatsSaveInterval.current)}
                     placeholder={t('statsSaveInterval.placeholder')}
                     className="w-48 rounded-xl"
                 />

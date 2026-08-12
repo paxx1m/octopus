@@ -11,6 +11,8 @@ export interface SSEStreamOptions {
     /** 断线后是否指数退避重连，默认 true */
     reconnect?: boolean;
     maxReconnectDelay?: number;
+    /** 断线后成功重连（onopen 且非首次连接）时回调，用于回填断线期间丢失的数据 */
+    onReconnected?: () => void;
 }
 
 /**
@@ -23,6 +25,7 @@ export function useSSEStream({
     events,
     reconnect = true,
     maxReconnectDelay = 30_000,
+    onReconnected,
 }: SSEStreamOptions) {
     const [isConnected, setIsConnected] = useState(false);
     const [error, setError] = useState<Error | null>(null);
@@ -31,9 +34,13 @@ export function useSSEStream({
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const reconnectAttemptRef = useRef(0);
     const cancelledRef = useRef(false);
-    // 事件处理器放入 ref，避免每次渲染重建连接
+    // in-flight 互斥：避免 StrictMode 双执行 / 依赖变化 / 重连回调并发建流
+    const connectingRef = useRef(false);
+    // 事件处理器与回调放入 ref，避免每次渲染重建连接
     const eventsRef = useRef(events);
     eventsRef.current = events;
+    const onReconnectedRef = useRef(onReconnected);
+    onReconnectedRef.current = onReconnected;
 
     const scheduleReconnect = useCallback(
         (fn: () => void) => {
@@ -48,8 +55,11 @@ export function useSSEStream({
     );
 
     const connect = useCallback(async () => {
-        if (cancelledRef.current) return;
+        if (cancelledRef.current || connectingRef.current) return;
+        connectingRef.current = true;
         try {
+            // 重连取 token 阶段即视为未连接
+            setIsConnected(false);
             const { token } = await apiClient.get<{ token: string }>(tokenUrl);
             if (cancelledRef.current) return;
 
@@ -65,9 +75,13 @@ export function useSSEStream({
 
             eventSource.onopen = () => {
                 if (eventSourceRef.current !== eventSource) return;
+                const reconnected = reconnectAttemptRef.current > 0;
                 setIsConnected(true);
                 setError(null);
                 reconnectAttemptRef.current = 0;
+                if (reconnected) {
+                    onReconnectedRef.current?.();
+                }
             };
 
             const onEvent = (event: MessageEvent) => {
@@ -103,6 +117,8 @@ export function useSSEStream({
                     void connect();
                 });
             }
+        } finally {
+            connectingRef.current = false;
         }
     }, [tokenUrl, streamPath, reconnect, scheduleReconnect]);
 

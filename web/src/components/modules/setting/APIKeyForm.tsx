@@ -8,7 +8,7 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { PortalOverlay } from '@/components/common/PortalOverlay';
 import { useGroupList } from '@/api/endpoints/group';
-import type { APIKey } from '@/api/endpoints/apikey';
+import type { APIKey, APIKeyFormData } from '@/api/endpoints/apikey';
 import { cn } from '@/lib/utils';
 import {
     toExpireAt,
@@ -23,7 +23,7 @@ interface APIKeyFormProps {
     apiKey?: APIKey;
     isPending: boolean;
     submitLabel: string;
-    onSubmit: (data: Omit<APIKey, 'id' | 'api_key'>) => void;
+    onSubmit: (data: APIKeyFormData) => void;
     onClose: () => void;
 }
 
@@ -31,7 +31,7 @@ export function APIKeyForm({ apiKey, isPending, submitLabel, onSubmit, onClose }
     const t = useTranslations('setting');
     const { data: groups = [] } = useGroupList();
 
-    const [form, setForm] = useState<Omit<APIKey, 'id' | 'api_key'>>(() => ({
+    const [form, setForm] = useState<APIKeyFormData>(() => ({
         name: apiKey?.name ?? '',
         enabled: apiKey?.enabled ?? true,
         expire_at: apiKey?.expire_at,
@@ -306,7 +306,7 @@ export function APIKeyFormOverlay({
     apiKey?: APIKey;
     isPending: boolean;
     submitLabel: string;
-    onSubmit: (data: Omit<APIKey, 'id' | 'api_key'>) => void;
+    onSubmit: (data: APIKeyFormData) => void;
     onClose: () => void;
 }) {
     return (

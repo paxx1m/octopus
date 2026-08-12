@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -21,6 +22,9 @@ var lastSyncModelsTime atomic.Int64
 // syncModelsRunning 防止定时任务与手动触发并发执行同一同步。
 var syncModelsRunning atomic.Bool
 
+// manualSyncWG 跟踪手动触发的同步 goroutine，供 Stop 在关闭 DB 前等待。
+var manualSyncWG sync.WaitGroup
+
 // SyncModelsTask 同步模型任务
 func SyncModelsTask() {
 	if !syncModelsRunning.CompareAndSwap(false, true) {
@@ -37,7 +41,9 @@ func TriggerSyncModels() bool {
 	if !syncModelsRunning.CompareAndSwap(false, true) {
 		return false
 	}
+	manualSyncWG.Add(1)
 	go func() {
+		defer manualSyncWG.Done()
 		defer syncModelsRunning.Store(false)
 		runSyncModels()
 	}()

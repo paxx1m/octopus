@@ -8,13 +8,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/bestruirui/octopus/internal/client"
 	dbmodel "github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/relay/balancer"
 	"github.com/bestruirui/octopus/internal/relay/keymanager"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/gin-gonic/gin"
-	"github.com/looplj/axonhub/llm/httpclient"
 )
 
 // tryOneKeyFn 在选定渠道与 Key 上执行一次真实转发。
@@ -144,7 +144,11 @@ func completeAttempt(
 		WaitTime:      span.Duration().Milliseconds(),
 		RequestFailed: 1,
 	})
-	balancer.RecordFailure(channel.ID, usedKey.ID, circuitModel)
+	// 已写出部分成功响应后被中断（客户端断开等）：上游本身健康，
+	// 不把「部分成功」计入熔断连续失败，避免健康渠道被误熔断。
+	if !(c.Writer.Written() && statusCode >= 200 && statusCode < 300) {
+		balancer.RecordFailure(channel.ID, usedKey.ID, circuitModel)
+	}
 	return c.Writer.Written()
 }
 
@@ -170,14 +174,7 @@ func applyParamOverride(body []byte, overrideJSON string) ([]byte, bool) {
 }
 
 // applyCustomHeaders 应用渠道自定义 header；同名敏感头保持认证配置优先。
+// 实现收敛在 internal/client，relay 与 modelfetch 共用。
 func applyCustomHeaders(headers http.Header, custom []dbmodel.CustomHeader) {
-	for _, header := range custom {
-		if header.HeaderKey == "" {
-			continue
-		}
-		if headers.Get(header.HeaderKey) != "" && httpclient.IsSensitiveHeader(header.HeaderKey) {
-			continue
-		}
-		headers.Set(header.HeaderKey, header.HeaderValue)
-	}
+	client.ApplyCustomHeaders(headers, custom)
 }

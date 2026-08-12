@@ -74,3 +74,14 @@ export function formatAvgLatency(ms: number): string {
     if (ms < 60_000) return `${(ms / 1000).toFixed(2)}s`;
     return `${(ms / 60_000).toFixed(2)}m`;
 }
+
+/**
+ * 格式化后端返回的时间戳（ISO 字符串）；空值或无效年份（0001-01-01）返回 neverLabel。
+ * LLMPrice / LLMSync 等页面共用。
+ */
+export function formatTimestamp(timeStr: string | undefined | null, neverLabel: string): string {
+    if (!timeStr) return neverLabel;
+    const date = new Date(timeStr);
+    if (date.getFullYear() === 1) return neverLabel;
+    return date.toLocaleString();
+}

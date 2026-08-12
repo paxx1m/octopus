@@ -29,21 +29,4 @@ export const logger = {
         console.warn(...args);
     },
 
-    /**
-     * 调试日志 - 仅在开发环境输出
-     */
-    debug: (...args: unknown[]) => {
-        if (isDevelopment) {
-            console.debug(...args);
-        }
-    },
-
-    /**
-     * 信息日志 - 仅在开发环境输出
-     */
-    info: (...args: unknown[]) => {
-        if (isDevelopment) {
-            console.info(...args);
-        }
-    },
 };

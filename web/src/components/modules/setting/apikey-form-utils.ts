@@ -1,4 +1,4 @@
-import type { APIKey } from '@/api/endpoints/apikey';
+export type { APIKeyFormData } from '@/api/endpoints/apikey';
 
 export function toExpireAt(date: Date, time: string): number {
     const t = /^\d{2}:\d{2}$/.test(time) ? time : '00:00';
@@ -39,4 +39,3 @@ export function hasModel(supported: string | undefined, model: string): boolean 
     return supported ? supported.split(',').includes(model) : false;
 }
 
-export type APIKeyFormData = Omit<APIKey, 'id' | 'api_key'>;

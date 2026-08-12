@@ -16,6 +16,7 @@ import (
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
 	"github.com/bestruirui/octopus/internal/task"
+	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/gin-gonic/gin"
 )
 
@@ -116,6 +117,12 @@ func updateChannel(c *gin.Context) {
 // channelPostProcess 渠道创建/更新后的异步后处理：价格入库、延迟探测、自动分组。
 func channelPostProcess(channel *model.Channel) {
 	go func(ch *model.Channel) {
+		// goroutine 内 panic 会终止整个进程，必须恢复
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errorf("channel post process panicked (channel=%d): %v", ch.ID, r)
+			}
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		modelStr := ch.Model + "," + ch.CustomModel
@@ -153,7 +160,7 @@ func deleteChannel(c *gin.Context) {
 		serverError(c, err)
 		return
 	}
-	balancer.ClearStickyByChannel(idNum)
+	balancer.CleanupChannel(idNum)
 	keymanager.CleanupChannel(idNum)
 	resp.Success(c, nil)
 }

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { useSettingList, useSetSetting, SettingKey } from '@/api/endpoints/setting';
 import { useLastSyncTime, useSyncChannel } from '@/api/endpoints/channel';
 import { toast } from '@/components/common/Toast';
+import { formatTimestamp } from '@/lib/metrics';
 
 export function SettingLLMSync() {
     const t = useTranslations('setting');
@@ -49,13 +50,6 @@ export function SettingLLMSync() {
         });
     };
 
-    const formatLastSyncTime = (timeStr: string | undefined) => {
-        if (!timeStr) return t('llmSync.neverSynced');
-        const date = new Date(timeStr);
-        if (date.getFullYear() === 1) return t('llmSync.neverSynced');
-        return date.toLocaleString();
-    };
-
     return (
         <div className="rounded-3xl border border-border bg-card p-6 space-y-5">
             <h2 className="text-lg font-bold text-card-foreground flex items-center gap-2">
@@ -87,7 +81,7 @@ export function SettingLLMSync() {
                         <span className="text-sm font-medium">{t('llmSync.manualSync.label')}</span>
                     </div>
                     <span className="text-xs text-muted-foreground ml-8">
-                        {t('llmSync.lastSync')}: {formatLastSyncTime(lastSyncTime)}
+                        {t('llmSync.lastSync')}: {formatTimestamp(lastSyncTime, t('llmSync.neverSynced'))}
                     </span>
                 </div>
                 <Button

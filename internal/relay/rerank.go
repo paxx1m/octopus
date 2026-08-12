@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -44,7 +43,14 @@ func RerankHandler() gin.HandlerFunc {
 
 		// 与主 relay 一致：中间件写入的是逗号分隔 string，不是 []string
 		if supportedModels := c.GetString("supported_models"); supportedModels != "" {
-			if !slices.Contains(strings.Split(supportedModels, ","), req.Model) {
+			modelSupported := false
+			for _, m := range strings.Split(supportedModels, ",") {
+				if strings.TrimSpace(m) == req.Model {
+					modelSupported = true
+					break
+				}
+			}
+			if !modelSupported {
 				resp.Error(c, http.StatusBadRequest, "model not supported")
 				return
 			}

@@ -243,7 +243,7 @@ func RecordFailure(channelID, keyID int, modelName string) {
 				key, entry.ConsecutiveFailures, threshold, entry.TripCount, GetCooldown(entry.TripCount))
 			notify = true
 		}
-		// degraded (failures < threshold): no notify — 30s SSE resync is enough
+	// degraded (failures < threshold): no notify — 30s SSE resync is enough
 
 	case StateHalfOpen:
 		// 试探失败，重新进入 Open 状态，TripCount 递增（冷却时间翻倍）
@@ -253,10 +253,6 @@ func RecordFailure(channelID, keyID int, modelName string) {
 		log.Warnf("circuit breaker [%s] HalfOpen -> Open (probe failed, tripCount=%d, cooldown=%v)",
 			key, entry.TripCount, GetCooldown(entry.TripCount))
 		notify = true
-
-	case StateOpen:
-		// 理论上不应该在 Open 状态下接收到失败记录（请求应被拒绝），
-		// 但为安全起见仍更新失败时间
 	}
 	entry.mu.Unlock()
 	if notify {

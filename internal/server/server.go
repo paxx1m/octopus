@@ -42,7 +42,7 @@ func Start() error {
 	}))
 
 	if conf.IsDebug() {
-		r.Use(middleware.Logger())
+		r.Use(gin.Logger())
 	}
 	r.Use(middleware.Cors())
 	r.Use(middleware.StaticEmbed("/", static.StaticFS))

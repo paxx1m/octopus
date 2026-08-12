@@ -10,9 +10,6 @@ export type ChannelRankingSortMode =
     | 'cost'
     | 'tokens';
 
-/** @deprecated use ChannelRankingSortMode */
-export type RankSortMode = 'cost' | 'count' | 'tokens';
-
 export type ChartMetricType = 'cost' | 'count' | 'tokens';
 export type ChartPeriod = '1' | '7' | '30';
 
@@ -34,12 +31,9 @@ export function normalizeChannelRankingSort(value: unknown): ChannelRankingSortM
 }
 
 interface HomeViewState {
-    /** @deprecated migrated to channelRankingSort */
-    rankSortMode: RankSortMode;
     channelRankingSort: ChannelRankingSortMode;
     chartMetricType: ChartMetricType;
     chartPeriod: ChartPeriod;
-    setRankSortMode: (value: RankSortMode) => void;
     setChannelRankingSort: (value: ChannelRankingSortMode) => void;
     setChartMetricType: (value: ChartMetricType) => void;
     setChartPeriod: (value: ChartPeriod) => void;
@@ -48,22 +42,10 @@ interface HomeViewState {
 export const useHomeViewStore = create<HomeViewState>()(
     persist(
         (set) => ({
-            rankSortMode: 'count',
             channelRankingSort: 'count',
             chartMetricType: 'cost',
             chartPeriod: '1',
-            setRankSortMode: (value) =>
-                set({
-                    rankSortMode: value,
-                    channelRankingSort: normalizeChannelRankingSort(value) ?? 'count',
-                }),
-            setChannelRankingSort: (value) =>
-                set({
-                    channelRankingSort: value,
-                    // keep legacy field in sync when possible
-                    rankSortMode:
-                        value === 'cost' || value === 'count' || value === 'tokens' ? value : 'count',
-                }),
+            setChannelRankingSort: (value) => set({ channelRankingSort: value }),
             setChartMetricType: (value) => set({ chartMetricType: value }),
             setChartPeriod: (value) => set({ chartPeriod: value }),
         }),
@@ -71,26 +53,22 @@ export const useHomeViewStore = create<HomeViewState>()(
             name: 'home-view-options-storage',
             storage: createJSONStorage(() => localStorage),
             partialize: (state) => ({
-                rankSortMode: state.rankSortMode,
                 channelRankingSort: state.channelRankingSort,
                 chartMetricType: state.chartMetricType,
                 chartPeriod: state.chartPeriod,
             }),
             merge: (persisted, current) => {
                 const p = (persisted ?? {}) as Partial<HomeViewState>;
-                // Prefer new key; fall back to legacy rankSortMode (cost|count|tokens)
+                // Prefer new key; fall back to legacy rankSortMode (cost|count|tokens) for 旧 localStorage 数据
+                const legacy = (p as Record<string, unknown>).rankSortMode;
                 const ranking =
                     normalizeChannelRankingSort(p.channelRankingSort) ??
-                    normalizeChannelRankingSort(p.rankSortMode) ??
+                    normalizeChannelRankingSort(legacy) ??
                     'count';
                 return {
                     ...current,
                     ...p,
                     channelRankingSort: ranking,
-                    rankSortMode:
-                        ranking === 'cost' || ranking === 'count' || ranking === 'tokens'
-                            ? ranking
-                            : 'count',
                 };
             },
         },

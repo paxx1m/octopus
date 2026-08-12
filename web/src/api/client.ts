@@ -203,12 +203,12 @@ export const apiClient = {
     /**
      * POST 表单（multipart/form-data）
      */
-    postForm: <T>(path: string, form: FormData): Promise<T> =>
-        request<T>('POST', path, { rawBody: form }),
+    postForm: <T>(path: string, form: FormData, timeoutMs?: number): Promise<T> =>
+        request<T>('POST', path, { rawBody: form, timeoutMs }),
 
     /**
      * 下载文件（blob 响应）
      */
-    getBlob: (path: string, params?: Record<string, string | number | boolean>): Promise<BlobDownload> =>
-        request<BlobDownload>('GET', path, { params, responseType: 'blob' }),
+    getBlob: (path: string, params?: Record<string, string | number | boolean>, timeoutMs?: number): Promise<BlobDownload> =>
+        request<BlobDownload>('GET', path, { params, responseType: 'blob', timeoutMs }),
 };

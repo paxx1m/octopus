@@ -113,10 +113,11 @@ async function downloadBlob(blob: Blob, filename: string) {
 export function useExportDB() {
     return useMutation({
         mutationFn: async (options: DBExportOptions = {}) => {
+            // 大库导出可能超过默认 120s 超时，放宽到 10 分钟
             const res: BlobDownload = await apiClient.getBlob('/api/v1/setting/export', {
                 include_logs: String(!!options.include_logs),
                 include_stats: String(!!options.include_stats),
-            });
+            }, 600_000);
             const filename = res.filename || exportFallbackFilename();
             await downloadBlob(res.blob, filename);
             return { filename };
@@ -135,7 +136,8 @@ export function useImportDB() {
         mutationFn: async (file: File) => {
             const form = new FormData();
             form.append('file', file);
-            return apiClient.postForm<DBImportResult>('/api/v1/setting/import', form);
+            // 大文件导入可能超过默认 120s 超时，放宽到 10 分钟
+            return apiClient.postForm<DBImportResult>('/api/v1/setting/import', form, 600_000);
         },
         onError: (error) => {
             logger.error('导入数据库失败:', error);

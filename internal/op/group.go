@@ -30,14 +30,6 @@ func GroupListModel(ctx context.Context) ([]string, error) {
 	return models, nil
 }
 
-func GroupGet(id int, ctx context.Context) (*model.Group, error) {
-	group, ok := groupCache.Get(id)
-	if !ok {
-		return nil, fmt.Errorf("group not found")
-	}
-	return &group, nil
-}
-
 func GroupGetEnabledMap(name string, ctx context.Context) (model.Group, error) {
 	group, ok := groupMap.Get(name)
 	if !ok {
@@ -157,8 +149,9 @@ func GroupUpdate(req *model.GroupUpdateRequest, ctx context.Context) (group *mod
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	// 刷新缓存并返回最新数据
-	if err := groupRefreshCacheByID(req.ID, ctx); err != nil {
+	// 刷新缓存并返回最新数据；脱离请求取消信号——事务已提交，客户端断开不应导致
+	// "DB 已更新但缓存停留在旧值、接口返回 500"。
+	if err := groupRefreshCacheByID(req.ID, context.WithoutCancel(ctx)); err != nil {
 		return nil, err
 	}
 
@@ -204,18 +197,6 @@ func GroupDel(id int, ctx context.Context) (err error) {
 	groupCache.Del(id)
 	groupMap.Del(group.Name)
 	return nil
-}
-
-func GroupItemAdd(item *model.GroupItem, ctx context.Context) error {
-	if _, ok := groupCache.Get(item.GroupID); !ok {
-		return fmt.Errorf("group not found")
-	}
-
-	if err := db.GetDB().WithContext(ctx).Create(item).Error; err != nil {
-		return err
-	}
-
-	return groupRefreshCacheByID(item.GroupID, ctx)
 }
 
 func GroupItemBatchAdd(groupID int, items []model.GroupIDAndLLMName, ctx context.Context) error {
@@ -276,29 +257,6 @@ func GroupItemBatchAdd(groupID int, items []model.GroupIDAndLLMName, ctx context
 	return groupRefreshCacheByID(groupID, ctx)
 }
 
-func GroupItemUpdate(item *model.GroupItem, ctx context.Context) error {
-	if err := db.GetDB().WithContext(ctx).Model(item).
-		Select("ModelName", "Priority", "Weight").
-		Updates(item).Error; err != nil {
-		return err
-	}
-
-	return groupRefreshCacheByID(item.GroupID, ctx)
-}
-
-func GroupItemDel(id int, ctx context.Context) error {
-	var item model.GroupItem
-	if err := db.GetDB().WithContext(ctx).First(&item, id).Error; err != nil {
-		return fmt.Errorf("group item not found")
-	}
-
-	if err := db.GetDB().WithContext(ctx).Delete(&item).Error; err != nil {
-		return err
-	}
-
-	return groupRefreshCacheByID(item.GroupID, ctx)
-}
-
 // GroupItemBatchDelByChannelAndModels 根据渠道ID和模型名称批量删除分组项
 func GroupItemBatchDelByChannelAndModels(keys []model.GroupIDAndLLMName, ctx context.Context) error {
 	if len(keys) == 0 {
@@ -334,17 +292,6 @@ func GroupItemBatchDelByChannelAndModels(keys []model.GroupIDAndLLMName, ctx con
 	}
 
 	return nil
-}
-
-func GroupItemList(groupID int, ctx context.Context) ([]model.GroupItem, error) {
-	var items []model.GroupItem
-	if err := db.GetDB().WithContext(ctx).
-		Where("group_id = ?", groupID).
-		Order("priority ASC").
-		Find(&items).Error; err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 func groupRefreshCache(ctx context.Context) error {

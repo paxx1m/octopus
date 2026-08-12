@@ -20,7 +20,3 @@ export function unlockBodyScroll() {
         document.body.classList.remove('overflow-hidden');
     }
 }
-
-export function isBodyScrollLocked() {
-    return lockCount > 0;
-}

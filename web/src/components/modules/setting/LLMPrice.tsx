@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { useSettingList, useSetSetting, SettingKey } from '@/api/endpoints/setting';
 import { useUpdateModelPrice, useLastUpdateTime } from '@/api/endpoints/model';
 import { toast } from '@/components/common/Toast';
+import { formatTimestamp } from '@/lib/metrics';
 
 export function SettingLLMPrice() {
     const t = useTranslations('setting');
@@ -49,13 +50,6 @@ export function SettingLLMPrice() {
         });
     };
 
-    const formatLastUpdateTime = (timeStr: string | undefined) => {
-        if (!timeStr) return t('llmPrice.neverUpdated');
-        const date = new Date(timeStr);
-        if (date.getFullYear() === 1) return t('llmPrice.neverUpdated');
-        return date.toLocaleString();
-    };
-
     return (
         <div className="rounded-3xl border border-border bg-card p-6 space-y-5">
             <h2 className="text-lg font-bold text-card-foreground flex items-center gap-2">
@@ -87,7 +81,7 @@ export function SettingLLMPrice() {
                         <span className="text-sm font-medium">{t('llmPrice.manualUpdate.label')}</span>
                     </div>
                     <span className="text-xs text-muted-foreground ml-8">
-                        {t('llmPrice.lastUpdate')}: {formatLastUpdateTime(lastUpdateTime)}
+                        {t('llmPrice.lastUpdate')}: {formatTimestamp(lastUpdateTime, t('llmPrice.neverUpdated'))}
                     </span>
                 </div>
                 <Button

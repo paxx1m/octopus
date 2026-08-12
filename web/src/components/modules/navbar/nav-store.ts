@@ -7,7 +7,6 @@ const NAV_ORDER: NavItem[] = ['home', 'channel', 'group', 'health', 'model', 'lo
 
 interface NavState {
     activeItem: NavItem
-    prevItem: NavItem | null
     direction: number
     setActiveItem: (item: NavItem) => void
 }
@@ -16,7 +15,6 @@ export const useNavStore = create<NavState>()(
     persist(
         (set, get) => ({
             activeItem: 'home',
-            prevItem: null,
             direction: 0,
             setActiveItem: (item) => {
                 const { activeItem } = get()
@@ -26,7 +24,6 @@ export const useNavStore = create<NavState>()(
 
                 set({
                     activeItem: item,
-                    prevItem: activeItem,
                     direction
                 })
             },

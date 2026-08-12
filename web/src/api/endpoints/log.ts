@@ -49,16 +49,6 @@ export interface RelayLog {
 }
 
 /**
- * 日志列表查询参数
- */
-export interface LogListParams {
-    page?: number;
-    page_size?: number;
-    start_time?: number;
-    end_time?: number;
-}
-
-/**
  * 清空日志 Hook
  * 
  * @example
@@ -152,6 +142,10 @@ export function useLogs(options: { pageSize?: number } = {}) {
     const { isConnected, error } = useSSEStream({
         tokenUrl: '/api/v1/log/stream-token',
         streamPath: '/api/v1/log/stream',
+        // 断线期间后端只推新日志、无 replay：重连成功后回填首页数据
+        onReconnected: () => {
+            queryClient.invalidateQueries({ queryKey: logsInfiniteQueryKey(pageSize) });
+        },
         events: {
             message: (event) => {
                 try {

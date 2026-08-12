@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -44,7 +43,15 @@ func newRelayRun(c *gin.Context, inboundType llm.APIFormat, inAdapter transforme
 	}
 
 	if supportedModels := c.GetString("supported_models"); supportedModels != "" {
-		if !slices.Contains(strings.Split(supportedModels, ","), internalRequest.Model) {
+		// 兼容 "gpt-4o, gpt-4o-mini" 这类带空格的配置（与 getModelList 的 TrimSpace 规范化一致）
+		modelSupported := false
+		for _, m := range strings.Split(supportedModels, ",") {
+			if strings.TrimSpace(m) == internalRequest.Model {
+				modelSupported = true
+				break
+			}
+		}
+		if !modelSupported {
 			err := errors.New("model not supported")
 			resp.Error(c, http.StatusBadRequest, err.Error())
 			return nil, err

@@ -12,6 +12,7 @@ import {
     Key
 } from 'lucide-react';
 import { useUpdateChannel, useDeleteChannel, KeyMode, type Channel, type UpdateChannelRequest } from '@/api/endpoints/channel';
+import { maskChannelKey } from '@/components/modules/channel/form-utils';
 import { useMorphingDialog } from '@/components/ui/morphing-dialog';
 import { DialogShell } from '@/components/common/DialogShell';
 import { toast } from '@/components/common/Toast';
@@ -339,9 +340,7 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                                                 <div className={cn("size-2 shrink-0 rounded-full", key.enabled ? "bg-emerald-500" : "bg-destructive")} />
 
                                                 <span className="font-mono text-sm truncate min-w-0 flex-1">
-                                                    {key.channel_key.length > 10
-                                                        ? `${key.channel_key.slice(0, 4)}...${key.channel_key.slice(-4)}`
-                                                        : key.channel_key}
+                                                    {maskChannelKey(key.channel_key)}
                                                 </span>
 
                                                 {key.remark && (

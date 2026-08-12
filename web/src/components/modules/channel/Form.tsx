@@ -12,7 +12,7 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { defaultKeyItem, type ChannelFormData, type ChannelKeyFormItem } from './form-utils';
+import { defaultKeyItem, type ChannelFormData } from './form-utils';
 import { FormAdvancedSection } from './FormAdvancedSection';
 import { FormKeysSection } from './FormKeysSection';
 import { FormModelsSection } from './FormModelsSection';

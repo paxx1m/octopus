@@ -220,9 +220,5 @@ func fetchAnthropicModels(client *http.Client, ctx context.Context, request mode
 }
 
 func applyCustomHeaders(req *http.Request, channel model.Channel) {
-	for _, header := range channel.CustomHeader {
-		if header.HeaderKey != "" {
-			req.Header.Set(header.HeaderKey, header.HeaderValue)
-		}
-	}
+	client.ApplyCustomHeaders(req.Header, channel.CustomHeader)
 }

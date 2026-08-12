@@ -72,9 +72,14 @@ export function useAPIKeyDashboardStats() {
 }
 
 /**
+ * 创建/编辑 API Key 的表单数据（不含 id 与明文 key）
+ */
+export type APIKeyFormData = Omit<APIKey, 'id' | 'api_key'>;
+
+/**
  * 创建 API Key 请求
  */
-export type CreateAPIKeyRequest = Omit<APIKey, 'id' | 'api_key'> & { enabled?: boolean };
+export type CreateAPIKeyRequest = APIKeyFormData & { enabled?: boolean };
 
 /**
  * 更新 API Key 请求

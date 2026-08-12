@@ -123,20 +123,6 @@ export interface StatsAPIKeyFormatted extends StatsMetricsFormatted {
     api_key_id: number;
 }
 /**
- * 获取今日统计数据 Hook
- */
-export function useStatsToday() {
-    return useQuery({
-        queryKey: ['stats', 'today'],
-        queryFn: async () => {
-            return apiClient.get<StatsDaily>('/api/v1/stats/today');
-        },
-        refetchInterval: 30000,
-        refetchOnMount: 'always',
-    });
-}
-
-/**
  * 获取每日统计数据 Hook
  */
 export function useStatsDaily() {
@@ -145,7 +131,8 @@ export function useStatsDaily() {
         queryFn: async () => {
             return apiClient.get<StatsDaily[]>('/api/v1/stats/daily');
         },
-        select: (data) => data.map((item): StatsDailyFormatted => ({
+        // 空库时后端返回 nil 会被解包为 null，避免 select 中 null.map 崩溃
+        select: (data) => (data ?? []).map((item): StatsDailyFormatted => ({
             ...formatStatsMetrics(item),
             date: item.date,
         })),

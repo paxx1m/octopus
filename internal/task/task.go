@@ -117,6 +117,18 @@ func Stop(wait time.Duration) {
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
+
+	// 等待手动触发（/channel/sync）的同步 goroutine 结束，避免其继续写已关闭的 DB
+	manualSyncDone := make(chan struct{})
+	go func() {
+		manualSyncWG.Wait()
+		close(manualSyncDone)
+	}()
+	select {
+	case <-manualSyncDone:
+	case <-time.After(wait):
+		log.Warnf("manual model sync did not finish within %v", wait)
+	}
 	log.Infof("background tasks stopped")
 }
 

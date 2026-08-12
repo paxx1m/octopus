@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
@@ -67,6 +68,7 @@ func ChannelKeySetEnabled(keyID, channelID int, enabled bool) error {
 		return err
 	}
 
+	found := false
 	if len(ch.Keys) > 0 {
 		keys := make([]model.ChannelKey, len(ch.Keys))
 		copy(keys, ch.Keys)
@@ -74,14 +76,28 @@ func ChannelKeySetEnabled(keyID, channelID int, enabled bool) error {
 			if keys[i].ID == keyID {
 				keys[i].Enabled = enabled
 				channelKeyCache.Set(keyID, keys[i])
+				found = true
 				break
 			}
 		}
 		ch.Keys = keys
 		channelCache.Set(channelID, ch)
-	} else if k, ok := channelKeyCache.Get(keyID); ok {
-		k.Enabled = enabled
-		channelKeyCache.Set(keyID, k)
+	}
+	if !found {
+		if k, ok := channelKeyCache.Get(keyID); ok {
+			k.Enabled = enabled
+			channelKeyCache.Set(keyID, k)
+			// 渠道缓存中的 Keys 切片未同步该 key 的状态：后台整体刷新，
+			// 避免 relay 仍按旧 Enabled 选中已禁用的 key。
+			// 异步执行：本函数持有 channelLock，同步 refresh 会死锁。
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := channelRefreshCacheByID(channelID, ctx); err != nil {
+					log.Warnf("failed to refresh channel %d after key %d disable: %v", channelID, keyID, err)
+				}
+			}()
+		}
 	}
 	HealthNotify()
 	return nil
@@ -321,8 +337,9 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (channe
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	// 刷新缓存并返回最新数据
-	if err := channelRefreshCacheByID(req.ID, ctx); err != nil {
+	// 刷新缓存并返回最新数据；脱离请求取消信号——事务已提交，客户端断开不应导致
+	// "DB 已更新但缓存停留在旧值、接口返回 500"。
+	if err := channelRefreshCacheByID(req.ID, context.WithoutCancel(ctx)); err != nil {
 		return nil, err
 	}
 
@@ -403,6 +420,12 @@ func ChannelDel(id int, ctx context.Context) (err error) {
 	if err := tx.Commit().Error; err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+
+	// 与 channelRefreshCacheByID 共享同一把锁：防止并发 refresh（读 DB → Set 缓存）
+	// 在删除提交后把旧数据写回缓存，导致已删渠道"幽灵复活"。
+	mu := channelLock(id)
+	mu.Lock()
+	defer mu.Unlock()
 
 	// 删除缓存
 	channelCache.Del(id)

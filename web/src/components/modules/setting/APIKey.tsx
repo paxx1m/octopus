@@ -16,6 +16,7 @@ import {
     useUpdateAPIKey,
     useDeleteAPIKey,
     type APIKey,
+    type APIKeyFormData,
 } from '@/api/endpoints/apikey';
 import { useStatsAPIKey } from '@/api/endpoints/stats';
 import { toast } from '@/components/common/Toast';
@@ -274,7 +275,7 @@ function APIKeyPanelBase({
 
     const disabledHeaderActions = createAPIKey.isPending || isAdding || !!viewingStats || !!editingKey;
 
-    const handleCreate = useCallback((data: Omit<APIKey, 'id' | 'api_key'>) => {
+    const handleCreate = useCallback((data: APIKeyFormData) => {
         createAPIKey.mutate(data, {
             onSuccess: () => {
                 toast.success(t('apiKey.toast.createSuccess'));
@@ -287,7 +288,7 @@ function APIKeyPanelBase({
         });
     }, [createAPIKey, t]);
 
-    const handleUpdate = useCallback((apiKey: APIKey, data: Omit<APIKey, 'id' | 'api_key'>) => {
+    const handleUpdate = useCallback((apiKey: APIKey, data: APIKeyFormData) => {
         updateAPIKey.mutate({ id: apiKey.id, ...data }, {
             onSuccess: () => {
                 toast.success(t('apiKey.toast.updateSuccess'));

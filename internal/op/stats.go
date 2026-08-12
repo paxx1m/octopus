@@ -34,10 +34,6 @@ var statsChannelCache = cache.New[int, model.StatsChannel](16)
 var statsChannelDirty = newDirtySet()
 var statsChannelUpdateLock sync.RWMutex
 
-var statsModelCache = cache.New[int, model.StatsModel](16)
-var statsModelDirty = newDirtySet()
-var statsModelUpdateLock sync.RWMutex
-
 var statsAPIKeyCache = cache.New[int, model.StatsAPIKey](16)
 var statsAPIKeyDirty = newDirtySet()
 var statsAPIKeyUpdateLock sync.RWMutex
@@ -76,7 +72,6 @@ func StatsSaveDB(ctx context.Context) error {
 	statsHourlyCacheLock.RUnlock()
 
 	channelIDs := statsChannelDirty.Snapshot()
-	modelIDs := statsModelDirty.Snapshot()
 	apiKeyIDs := statsAPIKeyDirty.Snapshot()
 
 	statsDailyPendingLock.Lock()
@@ -89,9 +84,8 @@ func StatsSaveDB(ctx context.Context) error {
 	copy(pendingHourly, statsHourlyPending)
 	statsHourlyPendingLock.Unlock()
 
-	if err := persistStatsSnapshots(ctx, totalSnap, dailySnap, hourlyAll, channelIDs, modelIDs, apiKeyIDs, pendingDaily, pendingHourly); err != nil {
+	if err := persistStatsSnapshots(ctx, totalSnap, dailySnap, hourlyAll, channelIDs, apiKeyIDs, pendingDaily, pendingHourly); err != nil {
 		statsChannelDirty.Remerge(channelIDs)
-		statsModelDirty.Remerge(modelIDs)
 		statsAPIKeyDirty.Remerge(apiKeyIDs)
 		return err
 	}
@@ -136,7 +130,6 @@ func persistStatsSnapshots(
 	dailySnap model.StatsDaily,
 	hourlyAll [24]model.StatsHourly,
 	channelIDs []int,
-	modelIDs []int,
 	apiKeyIDs []int,
 	pendingDaily []model.StatsDaily,
 	pendingHourly []model.StatsHourly,
@@ -200,17 +193,11 @@ func persistStatsSnapshots(
 			if !ok {
 				continue
 			}
-			if result := tx.Save(&ch); result.Error != nil {
-				return result.Error
-			}
-		}
-
-		for _, id := range modelIDs {
-			m, ok := statsModelCache.Get(id)
-			if !ok {
+			// 渠道已删除时跳过：tx.Save 是 upsert，会把已删渠道的 stats 行复活成孤儿行
+			if _, exists := channelCache.Get(id); !exists {
 				continue
 			}
-			if result := tx.Save(&m); result.Error != nil {
+			if result := tx.Save(&ch); result.Error != nil {
 				return result.Error
 			}
 		}
@@ -322,22 +309,6 @@ func StatsHourlyUpdate(metrics model.StatsMetrics) error {
 	return nil
 }
 
-func StatsModelUpdate(stats model.StatsModel) error {
-	statsModelUpdateLock.Lock()
-	defer statsModelUpdateLock.Unlock()
-
-	modelCache, ok := statsModelCache.Get(stats.ID)
-	if !ok {
-		modelCache = model.StatsModel{
-			ID: stats.ID,
-		}
-	}
-	modelCache.StatsMetrics.Add(stats.StatsMetrics)
-	statsModelCache.Set(stats.ID, modelCache)
-	statsModelDirty.Mark(stats.ID)
-	return nil
-}
-
 func StatsAPIKeyUpdate(apiKeyID int, metrics model.StatsMetrics) error {
 	statsAPIKeyUpdateLock.Lock()
 	defer statsAPIKeyUpdateLock.Unlock()
@@ -352,18 +323,6 @@ func StatsAPIKeyUpdate(apiKeyID int, metrics model.StatsMetrics) error {
 	statsAPIKeyCache.Set(apiKeyID, apiKeyCache)
 	statsAPIKeyDirty.Mark(apiKeyID)
 	return nil
-}
-
-func StatsChannelDel(id int) error {
-	statsChannelUpdateLock.Lock()
-	defer statsChannelUpdateLock.Unlock()
-
-	if _, ok := statsChannelCache.Get(id); !ok {
-		return nil
-	}
-	statsChannelCache.Del(id)
-	statsChannelDirty.Remove(id)
-	return db.GetDB().Delete(&model.StatsChannel{}, id).Error
 }
 
 // StatsChannelCacheRemove 仅清理缓存与脏标记；DB 删除已由调用方在事务内完成。
