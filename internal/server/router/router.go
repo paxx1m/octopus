@@ -15,16 +15,13 @@ type GroupRouter struct {
 	Middlewares []gin.HandlerFunc
 }
 
-// Global registry for route groups
-var registeredRouters []*GroupRouter
-
-// NewGroupRouter creates a new GroupRouter with the given path and automatically registers it.
+// NewGroupRouter creates a new GroupRouter with the given path.
+// 注册由 server 层显式装配（RegisterAll），不再依赖 init() 全局副作用。
 func NewGroupRouter(path string) *GroupRouter {
 	router := &GroupRouter{
 		Path:   path,
 		Routes: make([]*Route, 0),
 	}
-	registeredRouters = append(registeredRouters, router)
 	return router
 }
 
@@ -77,18 +74,9 @@ func (r *Route) Validate() error {
 	return nil
 }
 
-// GetRouterCount returns the total count of registered routes
-func GetRouterCount() int {
-	count := 0
-	for _, router := range registeredRouters {
-		count += len(router.Routes)
-	}
-	return count
-}
-
-// RegisterAll registers all globally registered route groups to the Gin engine
-func RegisterAll(engine *gin.Engine) error {
-	for _, router := range registeredRouters {
+// RegisterAll registers the given route groups to the Gin engine.
+func RegisterAll(engine *gin.Engine, groups []*GroupRouter) error {
+	for _, router := range groups {
 		// Validate all routes in the group first
 		for _, route := range router.Routes {
 			if err := route.Validate(); err != nil {
@@ -108,7 +96,6 @@ func RegisterAll(engine *gin.Engine) error {
 			registerRoute(group, route.Method, route.Path, handlers)
 		}
 	}
-	registeredRouters = nil
 	return nil
 }
 

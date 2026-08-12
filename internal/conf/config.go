@@ -15,6 +15,9 @@ type Server struct {
 	Host      string `mapstructure:"host"`
 	Port      int    `mapstructure:"port"`
 	JWTSecret string `mapstructure:"jwt_secret"`
+	// TrustedProxies 信任的反向代理网段（CIDR/IP），用于从 X-Forwarded-For 等
+	// 头解析真实客户端 IP。默认不信任任何代理，此时限流按直连 RemoteAddr 计。
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
 }
 
 type Log struct {
@@ -116,6 +119,7 @@ func setDefaults() {
 	viper.SetDefault("server.host", "0.0.0.0")
 	viper.SetDefault("server.port", 8080)
 	viper.SetDefault("server.jwt_secret", "")
+	viper.SetDefault("server.trusted_proxies", []string{})
 	viper.SetDefault("database.type", "sqlite")
 	viper.SetDefault("database.path", "data/data.db")
 	viper.SetDefault("log.level", "info")

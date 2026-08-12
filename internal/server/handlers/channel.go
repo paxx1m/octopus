@@ -3,15 +3,15 @@ package handlers
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/bestruirui/octopus/internal/db"
-	"github.com/bestruirui/octopus/internal/helper"
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/modelfetch"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/price"
 	"github.com/bestruirui/octopus/internal/relay/balancer"
+	"github.com/bestruirui/octopus/internal/relay/keymanager"
 	"github.com/bestruirui/octopus/internal/server/middleware"
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
@@ -19,50 +19,52 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func init() {
-	router.NewGroupRouter("/api/v1/channel").
-		Use(middleware.Auth()).
-		Use(middleware.RequireJSON()).
-		AddRoute(
-			router.NewRoute("/list", http.MethodGet).
-				Handle(listChannel),
-		).
-		AddRoute(
-			router.NewRoute("/create", http.MethodPost).
-				Handle(createChannel),
-		).
-		AddRoute(
-			router.NewRoute("/update", http.MethodPost).
-				Handle(updateChannel),
-		).
-		AddRoute(
-			router.NewRoute("/enable", http.MethodPost).
-				Handle(enableChannel),
-		).
-		AddRoute(
-			router.NewRoute("/delete/:id", http.MethodDelete).
-				Handle(deleteChannel),
-		).
-		AddRoute(
-			router.NewRoute("/fetch-model", http.MethodPost).
-				Handle(fetchModel),
-		)
-	router.NewGroupRouter("/api/v1/channel").
-		Use(middleware.Auth()).
-		AddRoute(
-			router.NewRoute("/sync", http.MethodPost).
-				Handle(syncChannel),
-		).
-		AddRoute(
-			router.NewRoute("/last-sync-time", http.MethodGet).
-				Handle(getLastSyncTime),
-		)
+func RegisterChannelRoutes() []*router.GroupRouter {
+	return []*router.GroupRouter{
+		router.NewGroupRouter("/api/v1/channel").
+			Use(middleware.Auth()).
+			Use(middleware.RequireJSON()).
+			AddRoute(
+				router.NewRoute("/list", http.MethodGet).
+					Handle(listChannel),
+			).
+			AddRoute(
+				router.NewRoute("/create", http.MethodPost).
+					Handle(createChannel),
+			).
+			AddRoute(
+				router.NewRoute("/update", http.MethodPost).
+					Handle(updateChannel),
+			).
+			AddRoute(
+				router.NewRoute("/enable", http.MethodPost).
+					Handle(enableChannel),
+			).
+			AddRoute(
+				router.NewRoute("/delete/:id", http.MethodDelete).
+					Handle(deleteChannel),
+			).
+			AddRoute(
+				router.NewRoute("/fetch-model", http.MethodPost).
+					Handle(fetchModel),
+			),
+		router.NewGroupRouter("/api/v1/channel").
+			Use(middleware.Auth()).
+			AddRoute(
+				router.NewRoute("/sync", http.MethodPost).
+					Handle(syncChannel),
+			).
+			AddRoute(
+				router.NewRoute("/last-sync-time", http.MethodGet).
+					Handle(getLastSyncTime),
+			),
+	}
 }
 
 func listChannel(c *gin.Context) {
 	channels, err := op.ChannelList(c.Request.Context())
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	for i, channel := range channels {
@@ -74,45 +76,27 @@ func listChannel(c *gin.Context) {
 
 func createChannel(c *gin.Context) {
 	var channel model.Channel
-	if err := c.ShouldBindJSON(&channel); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+	if !bindJSON(c, &channel) {
 		return
 	}
 	if err := op.ChannelCreate(&channel, c.Request.Context()); err != nil {
-		if db.IsDuplicateError(err) {
-			resp.Error(c, http.StatusConflict, resp.ErrDuplicateResource)
-			return
-		}
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		handleWriteError(c, err)
 		return
 	}
 	stats := op.StatsChannelGet(channel.ID)
 	channel.Stats = &stats
-	go func(channel *model.Channel) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		modelStr := channel.Model + "," + channel.CustomModel
-		modelArray := strings.Split(modelStr, ",")
-		helper.LLMPriceAddToDB(modelArray, ctx)
-		helper.ChannelBaseUrlDelayUpdate(channel, ctx)
-		helper.ChannelAutoGroup(channel, ctx)
-	}(&channel)
+	channelPostProcess(&channel)
 	resp.Success(c, channel)
 }
 
 func updateChannel(c *gin.Context) {
 	var req model.ChannelUpdateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+	if !bindJSON(c, &req) {
 		return
 	}
 	channel, err := op.ChannelUpdate(&req, c.Request.Context())
 	if err != nil {
-		if db.IsDuplicateError(err) {
-			resp.Error(c, http.StatusConflict, resp.ErrDuplicateResource)
-			return
-		}
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		handleWriteError(c, err)
 		return
 	}
 	for _, keyID := range req.KeysToDelete {
@@ -125,16 +109,21 @@ func updateChannel(c *gin.Context) {
 	}
 	stats := op.StatsChannelGet(channel.ID)
 	channel.Stats = &stats
-	go func(channel *model.Channel) {
+	channelPostProcess(channel)
+	resp.Success(c, channel)
+}
+
+// channelPostProcess 渠道创建/更新后的异步后处理：价格入库、延迟探测、自动分组。
+func channelPostProcess(channel *model.Channel) {
+	go func(ch *model.Channel) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		modelStr := channel.Model + "," + channel.CustomModel
+		modelStr := ch.Model + "," + ch.CustomModel
 		modelArray := strings.Split(modelStr, ",")
-		helper.LLMPriceAddToDB(modelArray, ctx)
-		helper.ChannelBaseUrlDelayUpdate(channel, ctx)
-		helper.ChannelAutoGroup(channel, ctx)
+		price.AddModelsToDB(modelArray, ctx)
+		task.ChannelBaseUrlDelayUpdate(ch, ctx)
+		op.ChannelAutoGroup(ch, ctx)
 	}(channel)
-	resp.Success(c, channel)
 }
 
 func enableChannel(c *gin.Context) {
@@ -142,12 +131,11 @@ func enableChannel(c *gin.Context) {
 		ID      int  `json:"id"`
 		Enabled bool `json:"enabled"`
 	}
-	if err := c.ShouldBindJSON(&request); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+	if !bindJSON(c, &request) {
 		return
 	}
 	if err := op.ChannelEnabled(request.ID, request.Enabled, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	if !request.Enabled {
@@ -157,35 +145,37 @@ func enableChannel(c *gin.Context) {
 }
 
 func deleteChannel(c *gin.Context) {
-	id := c.Param("id")
-	idNum, err := strconv.Atoi(id)
-	if err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+	idNum, ok := pathID(c, "id")
+	if !ok {
 		return
 	}
 	if err := op.ChannelDel(idNum, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	balancer.ClearStickyByChannel(idNum)
+	keymanager.CleanupChannel(idNum)
 	resp.Success(c, nil)
 }
 func fetchModel(c *gin.Context) {
 	var request model.Channel
-	if err := c.ShouldBindJSON(&request); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+	if !bindJSON(c, &request) {
 		return
 	}
-	models, err := helper.FetchModels(c.Request.Context(), request)
+	models, err := modelfetch.FetchModels(c.Request.Context(), request)
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	resp.Success(c, models)
 }
 
 func syncChannel(c *gin.Context) {
-	task.SyncModelsTask()
+	// 异步触发，避免请求阻塞最长 30 分钟；前端通过 last-sync-time 轮询完成状态。
+	if !task.TriggerSyncModels() {
+		resp.Error(c, http.StatusConflict, "model sync already in progress")
+		return
+	}
 	resp.Success(c, nil)
 }
 

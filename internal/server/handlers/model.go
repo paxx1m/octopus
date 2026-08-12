@@ -14,56 +14,58 @@ import (
 	"github.com/samber/lo"
 )
 
-func init() {
-	router.NewGroupRouter("/api/v1/model").
-		Use(middleware.Auth()).
-		Use(middleware.RequireJSON()).
-		AddRoute(
-			router.NewRoute("/list", http.MethodGet).
-				Handle(listLLM),
-		).
-		AddRoute(
-			router.NewRoute("/create", http.MethodPost).
-				Handle(createLLM),
-		).
-		AddRoute(
-			router.NewRoute("/channel", http.MethodGet).
-				Handle(listLLMByChannel),
-		).
-		AddRoute(
-			router.NewRoute("/update", http.MethodPost).
-				Handle(updateLLM),
-		).
-		AddRoute(
-			router.NewRoute("/delete", http.MethodPost).
-				Handle(deleteLLM),
-		).
-		AddRoute(
-			router.NewRoute("/update-price", http.MethodPost).
-				Handle(updateLLMPrice),
-		).
-		AddRoute(
-			router.NewRoute("/last-update-time", http.MethodGet).
-				Handle(getLastUpdateTime),
-		)
-	router.NewGroupRouter("/v1").
-		Use(middleware.APIKeyAuth()).
-		AddRoute(
-			router.NewRoute("/models", http.MethodGet).
-				Handle(getModelList),
-		)
+func RegisterModelRoutes() []*router.GroupRouter {
+	return []*router.GroupRouter{
+		router.NewGroupRouter("/api/v1/model").
+			Use(middleware.Auth()).
+			Use(middleware.RequireJSON()).
+			AddRoute(
+				router.NewRoute("/list", http.MethodGet).
+					Handle(listLLM),
+			).
+			AddRoute(
+				router.NewRoute("/create", http.MethodPost).
+					Handle(createLLM),
+			).
+			AddRoute(
+				router.NewRoute("/channel", http.MethodGet).
+					Handle(listLLMByChannel),
+			).
+			AddRoute(
+				router.NewRoute("/update", http.MethodPost).
+					Handle(updateLLM),
+			).
+			AddRoute(
+				router.NewRoute("/delete", http.MethodPost).
+					Handle(deleteLLM),
+			).
+			AddRoute(
+				router.NewRoute("/update-price", http.MethodPost).
+					Handle(updateLLMPrice),
+			).
+			AddRoute(
+				router.NewRoute("/last-update-time", http.MethodGet).
+					Handle(getLastUpdateTime),
+			),
+		router.NewGroupRouter("/v1").
+			Use(middleware.APIKeyAuth()).
+			AddRoute(
+				router.NewRoute("/models", http.MethodGet).
+					Handle(getModelList),
+			),
+	}
 }
 
 func getModelList(c *gin.Context) {
 	models, err := op.GroupListModel(c.Request.Context())
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	apiKeyId := c.GetInt("api_key_id")
 	apiKey, err := op.APIKeyGet(apiKeyId, c.Request.Context())
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	if apiKey.SupportedModels != "" {
@@ -115,7 +117,7 @@ func getModelList(c *gin.Context) {
 func listLLM(c *gin.Context) {
 	models, err := op.LLMList(c.Request.Context())
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	resp.Success(c, models)
@@ -124,57 +126,53 @@ func listLLM(c *gin.Context) {
 func listLLMByChannel(c *gin.Context) {
 	channels, err := op.ChannelLLMList(c.Request.Context())
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	resp.Success(c, channels)
 }
 
 func createLLM(c *gin.Context) {
-	var model model.LLMInfo
-	if err := c.ShouldBindJSON(&model); err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+	var info model.LLMInfo
+	if !bindJSON(c, &info) {
 		return
 	}
-	if err := op.LLMCreate(model, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+	if err := op.LLMCreate(info, c.Request.Context()); err != nil {
+		serverError(c, err)
 		return
 	}
-	resp.Success(c, model)
+	resp.Success(c, info)
 }
 
 func updateLLM(c *gin.Context) {
-	var model model.LLMInfo
-	if err := c.ShouldBindJSON(&model); err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+	var info model.LLMInfo
+	if !bindJSON(c, &info) {
 		return
 	}
-	if err := op.LLMUpdate(model, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+	if err := op.LLMUpdate(info, c.Request.Context()); err != nil {
+		serverError(c, err)
 		return
 	}
-	resp.Success(c, model)
+	resp.Success(c, info)
 }
 
 func deleteLLM(c *gin.Context) {
 	var req struct {
 		Name string `json:"name" binding:"required"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+	if !bindJSON(c, &req) {
 		return
 	}
 	if err := op.LLMDelete(req.Name, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	resp.Success(c, nil)
 }
 
 func updateLLMPrice(c *gin.Context) {
-	err := price.UpdateLLMPrice(c.Request.Context())
-	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+	if err := price.UpdateLLMPrice(c.Request.Context()); err != nil {
+		serverError(c, err)
 		return
 	}
 	resp.Success(c, nil)

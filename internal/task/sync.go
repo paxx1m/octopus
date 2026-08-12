@@ -3,20 +3,48 @@ package task
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"time"
 
-	"github.com/bestruirui/octopus/internal/helper"
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/modelfetch"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/price"
 	"github.com/bestruirui/octopus/internal/utils/diff"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/bestruirui/octopus/internal/utils/xstrings"
 )
 
-var lastSyncModelsTime = time.Now()
+// lastSyncModelsTime 以 UnixNano 存储，避免定时任务与 handler 触发并发读写竞争。
+var lastSyncModelsTime atomic.Int64
+
+// syncModelsRunning 防止定时任务与手动触发并发执行同一同步。
+var syncModelsRunning atomic.Bool
 
 // SyncModelsTask 同步模型任务
 func SyncModelsTask() {
+	if !syncModelsRunning.CompareAndSwap(false, true) {
+		log.Debugf("sync models task skipped: previous run still in progress")
+		return
+	}
+	defer syncModelsRunning.Store(false)
+	runSyncModels()
+}
+
+// TriggerSyncModels 异步触发一次模型同步（handler 使用，避免请求内阻塞最长 30 分钟）。
+// 返回 false 表示已有同步在进行中。
+func TriggerSyncModels() bool {
+	if !syncModelsRunning.CompareAndSwap(false, true) {
+		return false
+	}
+	go func() {
+		defer syncModelsRunning.Store(false)
+		runSyncModels()
+	}()
+	return true
+}
+
+func runSyncModels() {
 	log.Debugf("sync models task started")
 	startTime := time.Now()
 	defer func() {
@@ -35,7 +63,7 @@ func SyncModelsTask() {
 		if !channel.AutoSync {
 			continue
 		}
-		fetchModels, err := helper.FetchModels(ctx, channel)
+		fetchModels, err := modelfetch.FetchModels(ctx, channel)
 		if err != nil {
 			log.Warnf("failed to fetch models for channel %s: %v", channel.Name, err)
 			continue
@@ -79,7 +107,7 @@ func SyncModelsTask() {
 
 		// 自动分组
 		if len(newModels) > 0 {
-			helper.ChannelAutoGroup(&channel, ctx)
+			op.ChannelAutoGroup(&channel, ctx)
 		}
 	}
 	llmPrice, err := op.LLMList(ctx)
@@ -94,18 +122,18 @@ func SyncModelsTask() {
 
 	deletedNorm, addedNorm := diff.Diff(llmPriceNames, totalNewModels)
 	if len(deletedNorm) > 0 {
-		if err := helper.LLMPriceDeleteFromDBWithNoPrice(deletedNorm, ctx); err != nil {
+		if err := price.DeleteModelsWithNoPrice(deletedNorm, ctx); err != nil {
 			log.Errorf("failed to batch delete models price: %v", err)
 		}
 	}
 	if len(addedNorm) > 0 {
-		if err := helper.LLMPriceAddToDB(addedNorm, ctx); err != nil {
+		if err := price.AddModelsToDB(addedNorm, ctx); err != nil {
 			log.Errorf("failed to add models price: %v", err)
 		}
 	}
-	lastSyncModelsTime = time.Now()
+	lastSyncModelsTime.Store(time.Now().UnixNano())
 }
 
 func GetLastSyncModelsTime() time.Time {
-	return lastSyncModelsTime
+	return time.Unix(0, lastSyncModelsTime.Load())
 }

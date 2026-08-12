@@ -2,21 +2,18 @@ package relay
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/bestruirui/octopus/internal/helper"
+	"github.com/bestruirui/octopus/internal/client"
 	dbmodel "github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/relay/balancer"
-	"github.com/bestruirui/octopus/internal/relay/keymanager"
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/gin-gonic/gin"
@@ -85,47 +82,17 @@ func newRelayRun(c *gin.Context, inboundType llm.APIFormat, inAdapter transforme
 	}, nil
 }
 
-// run 外层按分组候选渠道迭代；渠道内 Key 故障转移由 tryChannel 完成。
-// 只有 ok（完整成功）或 written（已向客户端写出，不可再试）才结束；否则继续下一渠道。
+// run 外层按分组候选渠道迭代；渠道内 Key 故障转移由 tryChannelWithKeys 完成。
 func (r *relayRun) run() {
-	ctx := r.c.Request.Context()
-	var lastErr error
-
-	for r.iter.Next() {
-		select {
-		case <-ctx.Done():
-			log.Infof("request context canceled, stopping retry")
-			r.metrics.Save(ctx, false, context.Canceled, r.iter.Attempts())
-			return
-		default:
-		}
-
-		ok, written, err := r.tryChannel()
-		if ok {
-			r.metrics.Save(ctx, true, nil, r.iter.Attempts())
-			return
-		}
-		if written {
-			// 流式已写出部分内容：不能换渠道，但 err 仍记失败（如客户端中途断开）。
-			r.metrics.Save(ctx, false, err, r.iter.Attempts())
-			return
-		}
-		if err != nil {
-			lastErr = err
-		}
-	}
-
-	if lastErr == nil {
-		lastErr = errors.New("all channels failed")
-	}
-	r.metrics.Save(ctx, false, lastErr, r.iter.Attempts())
-	resp.Error(r.c, http.StatusBadGateway, lastErr.Error())
-}
-
-// tryChannel 处理当前分组候选渠道，并在渠道内做 Key 快路径 / 多 Key 故障转移。
-// 公共选 Key / 粘性逻辑见 tryChannelWithKeys。
-func (r *relayRun) tryChannel() (ok, written bool, err error) {
-	return tryChannelWithKeys(r.c, r.iter, &r.stickyKeyID, r.metrics.APIKeyID, r.metrics.RequestModel, r.tryOneKey)
+	(&runState{
+		c:            r.c,
+		iter:         r.iter,
+		apiKeyID:     r.metrics.APIKeyID,
+		requestModel: r.metrics.RequestModel,
+		stickyKeyID:  &r.stickyKeyID,
+		tryOne:       r.tryOneKey,
+		record:       r.metrics,
+	}).run()
 }
 
 // tryOneKey 构建出站适配器、检查熔断，并执行一次转发。
@@ -188,29 +155,16 @@ func (ra *relayAttempt) run() (bool, bool, error) {
 		upstreamStatusCode = http.StatusOK
 	}
 
+	costDelta := 0.0
 	if fwdErr == nil {
-		costDelta := ra.metrics.Stats.InputCost + ra.metrics.Stats.OutputCost
-		keymanager.OnResult(ra.channel, ra.usedKey, upstreamStatusCode, costDelta)
+		costDelta = ra.metrics.Stats.InputCost + ra.metrics.Stats.OutputCost
+	}
+	written := completeAttempt(ra.c, ra.channel, ra.usedKey, ra.circuitModel,
+		ra.metrics.APIKeyID, ra.metrics.RequestModel, span, upstreamStatusCode, fwdErr, costDelta)
 
-		span.End(dbmodel.AttemptSuccess, "")
-		op.StatsChannelUpdate(ra.channel.ID, dbmodel.StatsMetrics{
-			WaitTime:       span.Duration().Milliseconds(),
-			RequestSuccess: 1,
-		})
-		balancer.RecordSuccess(ra.channel.ID, ra.usedKey.ID, ra.circuitModel)
-		balancer.SetSticky(ra.metrics.APIKeyID, ra.metrics.RequestModel, ra.channel.ID, ra.usedKey.ID)
+	if fwdErr == nil {
 		return true, false, nil
 	}
-
-	keymanager.OnResult(ra.channel, ra.usedKey, upstreamStatusCode, 0)
-	span.End(dbmodel.AttemptFailed, fwdErr.Error())
-	op.StatsChannelUpdate(ra.channel.ID, dbmodel.StatsMetrics{
-		WaitTime:      span.Duration().Milliseconds(),
-		RequestFailed: 1,
-	})
-	balancer.RecordFailure(ra.channel.ID, ra.usedKey.ID, ra.circuitModel)
-
-	written := ra.c.Writer.Written()
 	return false, written, fmt.Errorf("channel %s failed: %v", ra.channel.Name, fwdErr)
 }
 
@@ -256,7 +210,7 @@ func (ra *relayAttempt) forward() (int, error) {
 		return 0, fmt.Errorf("missing raw request")
 	}
 
-	httpClient, err := helper.ChannelHttpClient(ra.channel)
+	httpClient, err := client.ChannelHttpClient(ra.channel)
 	if err != nil {
 		log.Warnf("failed to get http client: %v", err)
 		return 0, err
@@ -343,33 +297,17 @@ func (ra *relayAttempt) forward() (int, error) {
 
 func (ra *relayAttempt) applyChannelRequestOptions(outboundRequest *httpclient.Request) {
 	// ParamOverride 只覆盖 JSON 请求体；multipart 图片编辑等请求不能按 map 合并。
-	if ra.channel.ParamOverride != nil && *ra.channel.ParamOverride != "" && strings.Contains(strings.ToLower(outboundRequest.Headers.Get("Content-Type")+" "+outboundRequest.ContentType), "application/json") {
-		var bodyMap map[string]any
-		if err := json.Unmarshal(outboundRequest.Body, &bodyMap); err != nil {
-			log.Warnf("failed to unmarshal request body: %v, skipping param_override", err)
+	if ra.channel.ParamOverride != nil && *ra.channel.ParamOverride != "" &&
+		strings.Contains(strings.ToLower(outboundRequest.Headers.Get("Content-Type")+" "+outboundRequest.ContentType), "application/json") {
+		modified, ok := applyParamOverride(outboundRequest.Body, *ra.channel.ParamOverride)
+		if !ok {
+			log.Warnf("failed to apply param_override, skipping")
 		} else {
-			var override map[string]any
-			if err := json.Unmarshal([]byte(*ra.channel.ParamOverride), &override); err != nil {
-				log.Warnf("failed to unmarshal param_override: %v, skipping", err)
-			} else {
-				maps.Copy(bodyMap, override)
-				modifiedBody, err := json.Marshal(bodyMap)
-				if err != nil {
-					log.Warnf("failed to marshal modified body: %v, skipping param_override", err)
-				} else {
-					outboundRequest.Body = modifiedBody
-					ra.metrics.ParamOverride = *ra.channel.ParamOverride
-				}
-			}
+			outboundRequest.Body = modified
+			ra.metrics.ParamOverride = *ra.channel.ParamOverride
 		}
 	}
-	for _, header := range ra.channel.CustomHeader {
-		// pipeline 在 raw request middleware 前已经写入 Auth；同名敏感头保持认证配置优先，延续旧 BuildHttpRequest 的覆盖顺序。
-		if outboundRequest.Headers.Get(header.HeaderKey) != "" && httpclient.IsSensitiveHeader(header.HeaderKey) {
-			continue
-		}
-		outboundRequest.Headers.Set(header.HeaderKey, header.HeaderValue)
-	}
+	applyCustomHeaders(outboundRequest.Headers, ra.channel.CustomHeader)
 }
 
 // streamEventBufferMax 限制内存中缓存的 SSE 事件数量，仅用于最终日志聚合。

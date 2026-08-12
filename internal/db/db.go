@@ -19,7 +19,9 @@ var db *gorm.DB
 
 func InitDB(dbType, dsn string, debug bool) error {
 	var err error
-	gormConfig := gorm.Config{Logger: logger.Discard}
+	// TranslateError 将驱动错误翻译为 gorm 语义化错误（ErrDuplicatedKey 等），
+	// 避免依赖驱动错误文案匹配。
+	gormConfig := gorm.Config{Logger: logger.Discard, TranslateError: true}
 	if debug {
 		gormConfig.Logger = logger.Default.LogMode(logger.Info)
 	}

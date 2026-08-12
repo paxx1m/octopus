@@ -16,25 +16,6 @@ export interface ApiError {
 }
 
 /**
- * 分页请求参数
- */
-export interface PaginationParams {
-    page: number;
-    page_size: number;
-}
-
-/**
- * 分页响应数据
- */
-export interface PaginatedResponse<T> {
-    items: T[];
-    total: number;
-    page: number;
-    page_size: number;
-    total_pages: number;
-}
-
-/**
  * HTTP 状态码常量
  */
 export const HttpStatus = {

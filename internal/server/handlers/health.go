@@ -15,23 +15,24 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func init() {
-	router.NewGroupRouter("/api/v1/health").
-		Use(middleware.Auth()).
-		AddRoute(
-			router.NewRoute("/list", http.MethodGet).
-				Handle(listHealth),
-		).
-		AddRoute(
-			router.NewRoute("/stream-token", http.MethodGet).
-				Handle(getHealthStreamToken),
-		)
-
-	router.NewGroupRouter("/api/v1/health").
-		AddRoute(
-			router.NewRoute("/stream", http.MethodGet).
-				Handle(streamHealth),
-		)
+func RegisterHealthRoutes() []*router.GroupRouter {
+	return []*router.GroupRouter{
+		router.NewGroupRouter("/api/v1/health").
+			Use(middleware.Auth()).
+			AddRoute(
+				router.NewRoute("/list", http.MethodGet).
+					Handle(listHealth),
+			).
+			AddRoute(
+				router.NewRoute("/stream-token", http.MethodGet).
+					Handle(getHealthStreamToken),
+			),
+		router.NewGroupRouter("/api/v1/health").
+			AddRoute(
+				router.NewRoute("/stream", http.MethodGet).
+					Handle(streamHealth),
+			),
+	}
 }
 
 func parseHealthBuildOpts(c *gin.Context) health.BuildOptions {
@@ -55,7 +56,7 @@ func listHealth(c *gin.Context) {
 func getHealthStreamToken(c *gin.Context) {
 	token, err := op.HealthStreamTokenCreate()
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	resp.Success(c, gin.H{"token": token})

@@ -8,7 +8,7 @@ import (
 
 	"github.com/bestruirui/octopus/internal/conf"
 	"github.com/bestruirui/octopus/internal/relay"
-	_ "github.com/bestruirui/octopus/internal/server/handlers"
+	"github.com/bestruirui/octopus/internal/server/handlers"
 	"github.com/bestruirui/octopus/internal/server/middleware"
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
@@ -30,6 +30,12 @@ func Start() error {
 	}
 
 	r := gin.New()
+	// 默认不信任任何代理，防止伪造 X-Forwarded-For 绕过基于 ClientIP 的限流；
+	// 部署在反向代理后时通过 server.trusted_proxies 显式信任代理网段。
+	if err := r.SetTrustedProxies(conf.AppConfig.Server.TrustedProxies); err != nil {
+		log.Warnf("invalid server.trusted_proxies, ignoring client IP headers: %v", err)
+		_ = r.SetTrustedProxies(nil)
+	}
 	r.Use(gin.CustomRecovery(func(c *gin.Context, recovered interface{}) {
 		resp.Error(c, http.StatusInternalServerError, resp.ErrInternalServer)
 		c.Abort()
@@ -42,7 +48,9 @@ func Start() error {
 	r.Use(middleware.StaticEmbed("/", static.StaticFS))
 
 	registerRelayRoutes(r)
-	router.RegisterAll(r)
+	if err := router.RegisterAll(r, adminRoutes()); err != nil {
+		return err
+	}
 
 	httpSrv.Addr = fmt.Sprintf("%s:%d", conf.AppConfig.Server.Host, conf.AppConfig.Server.Port)
 	httpSrv.Handler = r
@@ -59,6 +67,22 @@ func Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	return httpSrv.Shutdown(ctx)
+}
+
+// adminRoutes 显式装配各 handler 模块的路由（不再依赖 init() 全局副作用）。
+func adminRoutes() []*router.GroupRouter {
+	var groups []*router.GroupRouter
+	groups = append(groups, handlers.RegisterUserRoutes()...)
+	groups = append(groups, handlers.RegisterChannelRoutes()...)
+	groups = append(groups, handlers.RegisterGroupRoutes()...)
+	groups = append(groups, handlers.RegisterAPIKeyRoutes()...)
+	groups = append(groups, handlers.RegisterModelRoutes()...)
+	groups = append(groups, handlers.RegisterSettingRoutes()...)
+	groups = append(groups, handlers.RegisterStatsRoutes()...)
+	groups = append(groups, handlers.RegisterHealthRoutes()...)
+	groups = append(groups, handlers.RegisterLogRoutes()...)
+	groups = append(groups, handlers.RegisterUpdateRoutes()...)
+	return groups
 }
 
 func registerRelayRoutes(r *gin.Engine) {

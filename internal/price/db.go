@@ -1,21 +1,21 @@
-package helper
+package price
 
 import (
 	"context"
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
-	"github.com/bestruirui/octopus/internal/price"
 )
 
-func LLMPriceAddToDB(modelNames []string, ctx context.Context) error {
+// AddModelsToDB 将模型名写入数据库，优先附带预设价格表。
+func AddModelsToDB(modelNames []string, ctx context.Context) error {
 	newLLMInfos := make([]model.LLMInfo, 0, len(modelNames))
 	newLLMNames := make([]string, 0, len(modelNames))
 	for _, modelName := range modelNames {
 		if modelName == "" {
 			continue
 		}
-		modelPrice := price.GetLLMPrice(modelName)
+		modelPrice := GetLLMPrice(modelName)
 		if modelPrice != nil {
 			newLLMInfos = append(newLLMInfos, model.LLMInfo{
 				Name:     modelName,
@@ -32,7 +32,8 @@ func LLMPriceAddToDB(modelNames []string, ctx context.Context) error {
 	return nil
 }
 
-func LLMPriceDeleteFromDBWithNoPrice(modelNames []string, ctx context.Context) error {
+// DeleteModelsWithNoPrice 删除无价格的模型（价格全零时视为无价格）。
+func DeleteModelsWithNoPrice(modelNames []string, ctx context.Context) error {
 	if len(modelNames) == 0 {
 		return nil
 	}

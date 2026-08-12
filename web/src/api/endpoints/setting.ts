@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiClient, API_BASE_URL } from '../client';
+import { apiClient, type BlobDownload } from '../client';
 import { logger } from '@/lib/logger';
-import { useAuthStore } from './user';
 
 /**
  * Setting 数据
@@ -87,40 +86,6 @@ export interface DBExportOptions {
     include_stats?: boolean;
 }
 
-type ApiResponse<T> = {
-    code?: number;
-    message?: string;
-    data?: T;
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null;
-}
-
-function getMessageField(value: unknown): string | undefined {
-    if (!isRecord(value)) return undefined;
-    const msg = value.message;
-    return typeof msg === 'string' ? msg : undefined;
-}
-
-function getDataField<T>(value: unknown): T | undefined {
-    if (!isRecord(value)) return undefined;
-    return (value as ApiResponse<T>).data;
-}
-
-function getAuthHeader(): string {
-    const token = useAuthStore.getState().token;
-    if (!token) throw new Error('Not authenticated');
-    return `Bearer ${token}`;
-}
-
-function parseFilename(contentDisposition: string | null): string | null {
-    if (!contentDisposition) return null;
-    // e.g. attachment; filename="octopus-export-20250101120000.json"
-    const match = contentDisposition.match(/filename="([^"]+)"/i);
-    return match?.[1] ?? null;
-}
-
 function exportFallbackFilename() {
     const d = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -148,25 +113,12 @@ async function downloadBlob(blob: Blob, filename: string) {
 export function useExportDB() {
     return useMutation({
         mutationFn: async (options: DBExportOptions = {}) => {
-            const params = new URLSearchParams();
-            params.set('include_logs', String(!!options.include_logs));
-            params.set('include_stats', String(!!options.include_stats));
-
-            const res = await fetch(`${API_BASE_URL}/api/v1/setting/export?${params.toString()}`, {
-                method: 'GET',
-                headers: {
-                    Authorization: getAuthHeader(),
-                },
+            const res: BlobDownload = await apiClient.getBlob('/api/v1/setting/export', {
+                include_logs: String(!!options.include_logs),
+                include_stats: String(!!options.include_stats),
             });
-
-            if (!res.ok) {
-                const text = await res.text();
-                throw new Error(text || res.statusText);
-            }
-
-            const blob = await res.blob();
-            const filename = parseFilename(res.headers.get('content-disposition')) || exportFallbackFilename();
-            await downloadBlob(blob, filename);
+            const filename = res.filename || exportFallbackFilename();
+            await downloadBlob(res.blob, filename);
             return { filename };
         },
         onError: (error) => {
@@ -183,27 +135,7 @@ export function useImportDB() {
         mutationFn: async (file: File) => {
             const form = new FormData();
             form.append('file', file);
-
-            const res = await fetch(`${API_BASE_URL}/api/v1/setting/import`, {
-                method: 'POST',
-                headers: {
-                    Authorization: getAuthHeader(),
-                },
-                body: form,
-            });
-
-            const contentType = res.headers.get('content-type') || '';
-            const isJson = contentType.includes('application/json');
-            const data = isJson ? await res.json() : await res.text();
-
-            if (!res.ok) {
-                const message = getMessageField(data) ?? (typeof data === 'string' ? data : res.statusText);
-                throw new Error(message);
-            }
-
-            // 支持后端标准 ApiResponse：{code,message,data:{...}}
-            const nested = getDataField<DBImportResult>(data);
-            return nested ?? (data as DBImportResult);
+            return apiClient.postForm<DBImportResult>('/api/v1/setting/import', form);
         },
         onError: (error) => {
             logger.error('导入数据库失败:', error);

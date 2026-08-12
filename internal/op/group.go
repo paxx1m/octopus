@@ -69,7 +69,7 @@ func GroupCreate(group *model.Group, ctx context.Context) error {
 	return nil
 }
 
-func GroupUpdate(req *model.GroupUpdateRequest, ctx context.Context) (*model.Group, error) {
+func GroupUpdate(req *model.GroupUpdateRequest, ctx context.Context) (group *model.Group, err error) {
 	oldGroup, ok := groupCache.Get(req.ID)
 	if !ok {
 		return nil, fmt.Errorf("group not found")
@@ -82,36 +82,22 @@ func GroupUpdate(req *model.GroupUpdateRequest, ctx context.Context) (*model.Gro
 	}
 	defer func() {
 		if r := recover(); r != nil {
+			// 不静默吞掉 panic：回滚并返回显式错误，避免调用方拿到 (nil, nil)
 			tx.Rollback()
+			group = nil
+			err = fmt.Errorf("group update panicked: %v", r)
 		}
 	}()
 
-	var selectFields []string
-	updates := model.Group{ID: req.ID}
+	updates := newPartialUpdate()
+	updates.set(&model.Group{}, "name", req.Name)
+	updates.set(&model.Group{}, "mode", req.Mode)
+	updates.set(&model.Group{}, "match_regex", req.MatchRegex)
+	updates.set(&model.Group{}, "first_token_time_out", req.FirstTokenTimeOut)
+	updates.set(&model.Group{}, "session_keep_time", req.SessionKeepTime)
 
-	if req.Name != nil {
-		selectFields = append(selectFields, "name")
-		updates.Name = *req.Name
-	}
-	if req.Mode != nil {
-		selectFields = append(selectFields, "mode")
-		updates.Mode = *req.Mode
-	}
-	if req.MatchRegex != nil {
-		selectFields = append(selectFields, "match_regex")
-		updates.MatchRegex = *req.MatchRegex
-	}
-	if req.FirstTokenTimeOut != nil {
-		selectFields = append(selectFields, "first_token_time_out")
-		updates.FirstTokenTimeOut = *req.FirstTokenTimeOut
-	}
-	if req.SessionKeepTime != nil {
-		selectFields = append(selectFields, "session_keep_time")
-		updates.SessionKeepTime = *req.SessionKeepTime
-	}
-
-	if len(selectFields) > 0 {
-		if err := tx.Model(&model.Group{}).Where("id = ?", req.ID).Select(selectFields).Updates(&updates).Error; err != nil {
+	if len(updates) > 0 {
+		if err := tx.Model(&model.Group{}).Where("id = ?", req.ID).Updates(updates.gormMap()).Error; err != nil {
 			tx.Rollback()
 			return nil, fmt.Errorf("failed to update group: %w", err)
 		}
@@ -176,14 +162,15 @@ func GroupUpdate(req *model.GroupUpdateRequest, ctx context.Context) (*model.Gro
 		return nil, err
 	}
 
-	group, _ := groupCache.Get(req.ID)
+	cached, _ := groupCache.Get(req.ID)
+	group = &cached
 	if oldName != "" && oldName != group.Name {
 		groupMap.Del(oldName)
 	}
-	return &group, nil
+	return group, nil
 }
 
-func GroupDel(id int, ctx context.Context) error {
+func GroupDel(id int, ctx context.Context) (err error) {
 	group, ok := groupCache.Get(id)
 	if !ok {
 		return fmt.Errorf("group not found")
@@ -196,6 +183,7 @@ func GroupDel(id int, ctx context.Context) error {
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
+			err = fmt.Errorf("group delete panicked: %v", r)
 		}
 	}()
 

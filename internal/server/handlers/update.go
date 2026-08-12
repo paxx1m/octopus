@@ -11,27 +11,29 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func init() {
-	router.NewGroupRouter("/api/v1/update").
-		Use(middleware.Auth()).
-		AddRoute(
-			router.NewRoute("", http.MethodGet).
-				Handle(latest),
-		).
-		AddRoute(
-			router.NewRoute("/now-version", http.MethodGet).
-				Handle(getNowVersion),
-		).
-		AddRoute(
-			router.NewRoute("", http.MethodPost).
-				Handle(updateFunc),
-		)
+func RegisterUpdateRoutes() []*router.GroupRouter {
+	return []*router.GroupRouter{
+		router.NewGroupRouter("/api/v1/update").
+			Use(middleware.Auth()).
+			AddRoute(
+				router.NewRoute("", http.MethodGet).
+					Handle(latest),
+			).
+			AddRoute(
+				router.NewRoute("/now-version", http.MethodGet).
+					Handle(getNowVersion),
+			).
+			AddRoute(
+				router.NewRoute("", http.MethodPost).
+					Handle(updateFunc),
+			),
+	}
 }
 
 func latest(c *gin.Context) {
 	latestInfo, err := update.GetLatestInfo()
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	resp.Success(c, *latestInfo)
@@ -42,9 +44,8 @@ func getNowVersion(c *gin.Context) {
 }
 
 func updateFunc(c *gin.Context) {
-	err := update.UpdateCore()
-	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+	if err := update.UpdateCore(); err != nil {
+		serverError(c, err)
 		return
 	}
 	resp.Success(c, "update success")

@@ -13,27 +13,28 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func init() {
-	router.NewGroupRouter("/api/v1/log").
-		Use(middleware.Auth()).
-		AddRoute(
-			router.NewRoute("/list", http.MethodGet).
-				Handle(listLog),
-		).
-		AddRoute(
-			router.NewRoute("/clear", http.MethodDelete).
-				Handle(clearLog),
-		).
-		AddRoute(
-			router.NewRoute("/stream-token", http.MethodGet).
-				Handle(getStreamToken),
-		)
-
-	router.NewGroupRouter("/api/v1/log").
-		AddRoute(
-			router.NewRoute("/stream", http.MethodGet).
-				Handle(streamLog),
-		)
+func RegisterLogRoutes() []*router.GroupRouter {
+	return []*router.GroupRouter{
+		router.NewGroupRouter("/api/v1/log").
+			Use(middleware.Auth()).
+			AddRoute(
+				router.NewRoute("/list", http.MethodGet).
+					Handle(listLog),
+			).
+			AddRoute(
+				router.NewRoute("/clear", http.MethodDelete).
+					Handle(clearLog),
+			).
+			AddRoute(
+				router.NewRoute("/stream-token", http.MethodGet).
+					Handle(getStreamToken),
+			),
+		router.NewGroupRouter("/api/v1/log").
+			AddRoute(
+				router.NewRoute("/stream", http.MethodGet).
+					Handle(streamLog),
+			),
+	}
 }
 
 func listLog(c *gin.Context) {
@@ -67,7 +68,7 @@ func listLog(c *gin.Context) {
 
 	logs, err := op.RelayLogList(c.Request.Context(), startTime, endTime, page, pageSize)
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 
@@ -76,7 +77,7 @@ func listLog(c *gin.Context) {
 
 func clearLog(c *gin.Context) {
 	if err := op.RelayLogClear(c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	resp.Success(c, nil)
@@ -85,7 +86,7 @@ func clearLog(c *gin.Context) {
 func getStreamToken(c *gin.Context) {
 	token, err := op.RelayLogStreamTokenCreate()
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	resp.Success(c, gin.H{"token": token})

@@ -98,3 +98,15 @@ func CleanupRuntimeState() {
 	_ = cleanupExpiredSessions(24 * time.Hour)
 	_ = cleanupCircuitEntries(2 * time.Hour)
 }
+
+// CleanupChannel 渠道删除时清理其粘性会话与熔断条目，防止全局 map 无界增长。
+func CleanupChannel(channelID int) {
+	ClearStickyByChannel(channelID)
+	globalBreaker.Range(func(k, v any) bool {
+		key, _ := k.(string)
+		if cID, _, _ := parseCircuitKey(key); cID == channelID {
+			globalBreaker.Delete(k)
+		}
+		return true
+	})
+}

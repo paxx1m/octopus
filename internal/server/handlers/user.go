@@ -14,35 +14,36 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func init() {
-	router.NewGroupRouter("/api/v1/user").
-		Use(middleware.RequireJSON()).
-		AddRoute(
-			router.NewRoute("/login", http.MethodPost).
-				Use(middleware.LoginRateLimit(10, 15*time.Minute)).
-				Handle(login),
-		)
-	router.NewGroupRouter("/api/v1/user").
-		Use(middleware.Auth()).
-		Use(middleware.RequireJSON()).
-		AddRoute(
-			router.NewRoute("/change-password", http.MethodPost).
-				Handle(changePassword),
-		).
-		AddRoute(
-			router.NewRoute("/change-username", http.MethodPost).
-				Handle(changeUsername),
-		).
-		AddRoute(
-			router.NewRoute("/status", http.MethodGet).
-				Handle(status),
-		)
+func RegisterUserRoutes() []*router.GroupRouter {
+	return []*router.GroupRouter{
+		router.NewGroupRouter("/api/v1/user").
+			Use(middleware.RequireJSON()).
+			AddRoute(
+				router.NewRoute("/login", http.MethodPost).
+					Use(middleware.LoginRateLimit(10, 15*time.Minute)).
+					Handle(login),
+			),
+		router.NewGroupRouter("/api/v1/user").
+			Use(middleware.Auth()).
+			Use(middleware.RequireJSON()).
+			AddRoute(
+				router.NewRoute("/change-password", http.MethodPost).
+					Handle(changePassword),
+			).
+			AddRoute(
+				router.NewRoute("/change-username", http.MethodPost).
+					Handle(changeUsername),
+			).
+			AddRoute(
+				router.NewRoute("/status", http.MethodGet).
+					Handle(status),
+			),
+	}
 }
 
 func login(c *gin.Context) {
 	var user model.UserLogin
-	if err := c.ShouldBindJSON(&user); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+	if !bindJSON(c, &user) {
 		return
 	}
 	if err := op.UserVerify(user.Username, user.Password); err != nil {
@@ -63,8 +64,7 @@ func login(c *gin.Context) {
 
 func changePassword(c *gin.Context) {
 	var user model.UserChangePassword
-	if err := c.ShouldBindJSON(&user); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+	if !bindJSON(c, &user) {
 		return
 	}
 	if err := op.UserChangePassword(user.OldPassword, user.NewPassword); err != nil {
@@ -82,8 +82,7 @@ func changePassword(c *gin.Context) {
 
 func changeUsername(c *gin.Context) {
 	var user model.UserChangeUsername
-	if err := c.ShouldBindJSON(&user); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+	if !bindJSON(c, &user) {
 		return
 	}
 	if err := op.UserChangeUsername(user.NewUsername); err != nil {

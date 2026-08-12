@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { apiClient, API_BASE_URL } from '../client';
+import { apiClient } from '../client';
+import { useSSEStream } from './sse';
 import { logger } from '@/lib/logger';
 
 export type HealthStatus =
@@ -200,12 +201,6 @@ export function useHealth(params: HealthFilterParams = {}) {
     const { groupId, abnormalOnly = true } = params;
     const [snapshot, setSnapshot] = useState<HealthSnapshot | null>(null);
     const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
-    const [isConnected, setIsConnected] = useState(false);
-    const [streamError, setStreamError] = useState<Error | null>(null);
-    const eventSourceRef = useRef<EventSource | null>(null);
-    const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const reconnectAttemptRef = useRef(0);
-    const cancelledRef = useRef(false);
 
     const listQuery = useQuery({
         queryKey: healthListQueryKey,
@@ -229,93 +224,21 @@ export function useHealth(params: HealthFilterParams = {}) {
         return () => clearInterval(id);
     }, []);
 
-    const connect = useCallback(async () => {
-        if (cancelledRef.current) return;
-        try {
-            const { token } = await apiClient.get<{ token: string }>('/api/v1/health/stream-token');
-            if (cancelledRef.current) return;
-
-            if (eventSourceRef.current) {
-                eventSourceRef.current.onerror = null;
-                eventSourceRef.current.close();
-                eventSourceRef.current = null;
-            }
-
-            // Always full snapshot — filters applied client-side so SSE stays open
-            const eventSource = new EventSource(
-                `${API_BASE_URL}/api/v1/health/stream?token=${token}&${FULL_LIST_QS}`
-            );
-            eventSourceRef.current = eventSource;
-
-            eventSource.onopen = () => {
-                if (eventSourceRef.current !== eventSource) return;
-                setIsConnected(true);
-                setStreamError(null);
-                reconnectAttemptRef.current = 0;
-            };
-
-            const onSnapshot = (event: MessageEvent) => {
-                if (eventSourceRef.current !== eventSource) return;
+    // Always full snapshot — filters applied client-side so SSE stays open
+    const { isConnected, error: streamError } = useSSEStream({
+        tokenUrl: '/api/v1/health/stream-token',
+        streamPath: `/api/v1/health/stream?${FULL_LIST_QS}`,
+        events: {
+            snapshot: (event) => {
                 try {
                     const data = JSON.parse(event.data) as HealthSnapshot;
                     setSnapshot(data);
                 } catch (e) {
                     logger.error('解析健康快照失败:', e);
                 }
-            };
-
-            eventSource.addEventListener('snapshot', onSnapshot);
-
-            eventSource.onerror = () => {
-                if (eventSourceRef.current !== eventSource) return;
-
-                setIsConnected(false);
-                setStreamError(new Error('SSE disconnected'));
-                eventSource.onerror = null;
-                eventSource.close();
-                eventSourceRef.current = null;
-
-                if (cancelledRef.current) return;
-                const attempt = reconnectAttemptRef.current + 1;
-                reconnectAttemptRef.current = attempt;
-                const delay = Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5));
-                if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-                reconnectTimerRef.current = setTimeout(() => {
-                    void connect();
-                }, delay);
-            };
-        } catch (e) {
-            if (cancelledRef.current) return;
-            setStreamError(e instanceof Error ? e : new Error('stream token failed'));
-            logger.error('获取 health stream token 失败:', e);
-            const attempt = reconnectAttemptRef.current + 1;
-            reconnectAttemptRef.current = attempt;
-            const delay = Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5));
-            if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-            reconnectTimerRef.current = setTimeout(() => {
-                void connect();
-            }, delay);
-        }
-    }, []);
-
-    useEffect(() => {
-        cancelledRef.current = false;
-        void connect();
-        return () => {
-            cancelledRef.current = true;
-            if (reconnectTimerRef.current) {
-                clearTimeout(reconnectTimerRef.current);
-                reconnectTimerRef.current = null;
-            }
-            const es = eventSourceRef.current;
-            if (es) {
-                es.onerror = null;
-                es.close();
-                eventSourceRef.current = null;
-            }
-            setIsConnected(false);
-        };
-    }, [connect]);
+            },
+        },
+    });
 
     const live = useMemo(() => {
         if (!snapshot) return null;

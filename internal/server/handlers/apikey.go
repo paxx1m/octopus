@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -15,47 +14,48 @@ import (
 	"github.com/samber/lo"
 )
 
-func init() {
-	router.NewGroupRouter("/api/v1/apikey").
-		Use(middleware.Auth()).
-		Use(middleware.RequireJSON()).
-		AddRoute(
-			router.NewRoute("/create", http.MethodPost).
-				Handle(createAPIKey),
-		).
-		AddRoute(
-			router.NewRoute("/list", http.MethodGet).
-				Handle(listAPIKey),
-		).
-		AddRoute(
-			router.NewRoute("/update", http.MethodPost).
-				Handle(updateAPIKey),
-		).
-		AddRoute(
-			router.NewRoute("/delete/:id", http.MethodDelete).
-				Handle(deleteAPIKey),
-		)
-	router.NewGroupRouter("/api/v1/apikey").
-		Use(middleware.APIKeyAuth()).
-		AddRoute(
-			router.NewRoute("/stats", http.MethodGet).
-				Handle(getStatsAPIKeyById),
-		).
-		AddRoute(
-			router.NewRoute("/login", http.MethodGet).
-				Handle(loginAPIKey),
-		)
+func RegisterAPIKeyRoutes() []*router.GroupRouter {
+	return []*router.GroupRouter{
+		router.NewGroupRouter("/api/v1/apikey").
+			Use(middleware.Auth()).
+			Use(middleware.RequireJSON()).
+			AddRoute(
+				router.NewRoute("/create", http.MethodPost).
+					Handle(createAPIKey),
+			).
+			AddRoute(
+				router.NewRoute("/list", http.MethodGet).
+					Handle(listAPIKey),
+			).
+			AddRoute(
+				router.NewRoute("/update", http.MethodPost).
+					Handle(updateAPIKey),
+			).
+			AddRoute(
+				router.NewRoute("/delete/:id", http.MethodDelete).
+					Handle(deleteAPIKey),
+			),
+		router.NewGroupRouter("/api/v1/apikey").
+			Use(middleware.APIKeyAuth()).
+			AddRoute(
+				router.NewRoute("/stats", http.MethodGet).
+					Handle(getStatsAPIKeyById),
+			).
+			AddRoute(
+				router.NewRoute("/login", http.MethodGet).
+					Handle(loginAPIKey),
+			),
+	}
 }
 
 func createAPIKey(c *gin.Context) {
 	var req model.APIKey
-	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+	if !bindJSON(c, &req) {
 		return
 	}
 	req.APIKey = auth.GenerateAPIKey()
 	if err := op.APIKeyCreate(&req, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	resp.Success(c, req)
@@ -64,7 +64,7 @@ func createAPIKey(c *gin.Context) {
 func listAPIKey(c *gin.Context) {
 	apiKeys, err := op.APIKeyList(c.Request.Context())
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	resp.Success(c, apiKeys)
@@ -72,26 +72,23 @@ func listAPIKey(c *gin.Context) {
 
 func updateAPIKey(c *gin.Context) {
 	var req model.APIKey
-	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+	if !bindJSON(c, &req) {
 		return
 	}
 	if err := op.APIKeyUpdate(&req, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	resp.Success(c, req)
 }
 
 func deleteAPIKey(c *gin.Context) {
-	id := c.Param("id")
-	idNum, err := strconv.Atoi(id)
-	if err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+	idNum, ok := pathID(c, "id")
+	if !ok {
 		return
 	}
 	if err := op.APIKeyDelete(idNum, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	resp.Success(c, nil)
@@ -102,12 +99,12 @@ func getStatsAPIKeyById(c *gin.Context) {
 	stats := op.StatsAPIKeyGet(id)
 	info, err := op.APIKeyGet(id, c.Request.Context())
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	models, err := op.GroupListModel(c.Request.Context())
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	var modelsString string

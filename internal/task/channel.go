@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/bestruirui/octopus/internal/helper"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/utils/log"
 )
@@ -26,6 +25,6 @@ func ChannelBaseUrlDelayTask() {
 		if !channel.Enabled {
 			continue
 		}
-		helper.ChannelBaseUrlDelayUpdate(&channel, ctx)
+		ChannelBaseUrlDelayUpdate(&channel, ctx)
 	}
 }

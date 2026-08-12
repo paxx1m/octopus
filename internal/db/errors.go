@@ -1,15 +1,16 @@
 package db
 
-import "strings"
+import (
+	"errors"
 
-// IsDuplicateError reports whether err is a UNIQUE / duplicate-key constraint failure
-// from SQLite, MySQL, or PostgreSQL (message-based; portable without driver-specific types).
+	"gorm.io/gorm"
+)
+
+// IsDuplicateError reports whether err is a UNIQUE / duplicate-key constraint failure.
+// 依赖 gorm.Config{TranslateError: true} 的语义化错误，不匹配驱动文案。
 func IsDuplicateError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "unique constraint") ||
-		strings.Contains(msg, "duplicate entry") ||
-		strings.Contains(msg, "duplicate key value")
+	return errors.Is(err, gorm.ErrDuplicatedKey)
 }

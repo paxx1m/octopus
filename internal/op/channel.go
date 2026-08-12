@@ -15,8 +15,7 @@ import (
 
 var channelCache = cache.New[int, model.Channel](16)
 var channelKeyCache = cache.New[int, model.ChannelKey](16)
-var channelKeyCacheNeedUpdate = make(map[int]struct{})
-var channelKeyCacheNeedUpdateLock sync.Mutex
+var channelKeyDirty = newDirtySet()
 var channelUpdateLocks sync.Map // channelID -> *sync.Mutex
 
 func channelLock(channelID int) *sync.Mutex {
@@ -27,7 +26,8 @@ func channelLock(channelID int) *sync.Mutex {
 func ChannelList(ctx context.Context) ([]model.Channel, error) {
 	channels := make([]model.Channel, 0, channelCache.Len())
 	for _, channel := range channelCache.GetAll() {
-		channels = append(channels, channel)
+		// 深拷贝，避免调用方修改 Keys/BaseUrls 等切片污染缓存
+		channels = append(channels, cloneChannel(channel))
 	}
 	return channels, nil
 }
@@ -134,9 +134,7 @@ func ChannelKeyApplyUpdate(keyID, channelID, statusCode int, lastUseTimeStamp in
 
 	channelCache.Set(channelID, ch)
 	channelKeyCache.Set(keyID, updated)
-	channelKeyCacheNeedUpdateLock.Lock()
-	channelKeyCacheNeedUpdate[keyID] = struct{}{}
-	channelKeyCacheNeedUpdateLock.Unlock()
+	channelKeyDirty.Mark(keyID)
 	return nil
 }
 
@@ -167,20 +165,15 @@ func ChannelBaseUrlUpdate(channelID int, baseUrl []model.BaseUrl) error {
 
 // ChannelKeySaveDB 将运行时更新过的 ChannelKey 缓存写入数据库。
 func ChannelKeySaveDB(ctx context.Context) error {
-	return channelKeyPersist(ctx, snapshotDirtyIDs(&channelKeyCacheNeedUpdate, &channelKeyCacheNeedUpdateLock))
+	return channelKeyPersist(ctx, channelKeyDirty.Snapshot())
 }
 
 // channelKeySaveDBByChannel 将指定渠道下 dirty 的 key 落库。
 func channelKeySaveDBByChannel(ctx context.Context, channelID int) error {
-	channelKeyCacheNeedUpdateLock.Lock()
-	keyIDs := make([]int, 0)
-	for id := range channelKeyCacheNeedUpdate {
-		if k, ok := channelKeyCache.Get(id); ok && k.ChannelID == channelID {
-			keyIDs = append(keyIDs, id)
-			delete(channelKeyCacheNeedUpdate, id)
-		}
-	}
-	channelKeyCacheNeedUpdateLock.Unlock()
+	keyIDs := channelKeyDirty.SnapshotFiltered(func(id int) bool {
+		k, ok := channelKeyCache.Get(id)
+		return ok && k.ChannelID == channelID
+	})
 	return channelKeyPersist(ctx, keyIDs)
 }
 
@@ -201,13 +194,13 @@ func channelKeyPersist(ctx context.Context, keyIDs []int) error {
 		return nil
 	})
 	if err != nil {
-		remergeDirtyIDs(&channelKeyCacheNeedUpdate, &channelKeyCacheNeedUpdateLock, keyIDs)
+		channelKeyDirty.Remerge(keyIDs)
 		return err
 	}
 	return nil
 }
 
-func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model.Channel, error) {
+func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (channel *model.Channel, err error) {
 	_, ok := channelCache.Get(req.ID)
 	if !ok {
 		return nil, fmt.Errorf("channel not found")
@@ -219,77 +212,33 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 	}
 	defer func() {
 		if r := recover(); r != nil {
+			// 不静默吞掉 panic：回滚并返回显式错误，避免调用方拿到 (nil, nil)
 			tx.Rollback()
+			channel = nil
+			err = fmt.Errorf("channel update panicked: %v", r)
 		}
 	}()
 
-	var selectFields []string
-	updates := model.Channel{ID: req.ID}
-
-	if req.Name != nil {
-		selectFields = append(selectFields, "name")
-		updates.Name = *req.Name
-	}
-	if req.Type != nil {
-		selectFields = append(selectFields, "type")
-		updates.Type = *req.Type
-	}
-	if req.Enabled != nil {
-		selectFields = append(selectFields, "enabled")
-		updates.Enabled = *req.Enabled
-	}
-	if req.BaseUrls != nil {
-		selectFields = append(selectFields, "base_urls")
-		updates.BaseUrls = *req.BaseUrls
-	}
-	if req.Model != nil {
-		selectFields = append(selectFields, "model")
-		updates.Model = *req.Model
-	}
-	if req.CustomModel != nil {
-		selectFields = append(selectFields, "custom_model")
-		updates.CustomModel = *req.CustomModel
-	}
-	if req.Proxy != nil {
-		selectFields = append(selectFields, "proxy")
-		updates.Proxy = *req.Proxy
-	}
-	if req.AutoSync != nil {
-		selectFields = append(selectFields, "auto_sync")
-		updates.AutoSync = *req.AutoSync
-	}
-	if req.AutoGroup != nil {
-		selectFields = append(selectFields, "auto_group")
-		updates.AutoGroup = *req.AutoGroup
-	}
-	if req.CustomHeader != nil {
-		selectFields = append(selectFields, "custom_header")
-		updates.CustomHeader = *req.CustomHeader
-	}
-	if req.ChannelProxy != nil {
-		selectFields = append(selectFields, "channel_proxy")
-		updates.ChannelProxy = req.ChannelProxy
-	}
-	if req.ParamOverride != nil {
-		selectFields = append(selectFields, "param_override")
-		updates.ParamOverride = req.ParamOverride
-	}
-	if req.MatchRegex != nil {
-		selectFields = append(selectFields, "match_regex")
-		updates.MatchRegex = req.MatchRegex
-	}
-	if req.KeyMode != nil {
-		selectFields = append(selectFields, "key_mode")
-		updates.KeyMode = *req.KeyMode
-	}
-	if req.AllowEmptyKey != nil {
-		selectFields = append(selectFields, "allow_empty_key")
-		updates.AllowEmptyKey = *req.AllowEmptyKey
-	}
+	var updates = newPartialUpdate()
+	updates.set(&model.Channel{}, "name", req.Name)
+	updates.set(&model.Channel{}, "type", req.Type)
+	updates.set(&model.Channel{}, "enabled", req.Enabled)
+	updates.set(&model.Channel{}, "base_urls", req.BaseUrls)
+	updates.set(&model.Channel{}, "model", req.Model)
+	updates.set(&model.Channel{}, "custom_model", req.CustomModel)
+	updates.set(&model.Channel{}, "proxy", req.Proxy)
+	updates.set(&model.Channel{}, "auto_sync", req.AutoSync)
+	updates.set(&model.Channel{}, "auto_group", req.AutoGroup)
+	updates.set(&model.Channel{}, "custom_header", req.CustomHeader)
+	updates.set(&model.Channel{}, "channel_proxy", req.ChannelProxy)
+	updates.set(&model.Channel{}, "param_override", req.ParamOverride)
+	updates.set(&model.Channel{}, "match_regex", req.MatchRegex)
+	updates.set(&model.Channel{}, "key_mode", req.KeyMode)
+	updates.set(&model.Channel{}, "allow_empty_key", req.AllowEmptyKey)
 
 	// 只有当有字段需要更新时才执行 UPDATE
-	if len(selectFields) > 0 {
-		if err := tx.Model(&model.Channel{}).Where("id = ?", req.ID).Select(selectFields).Updates(&updates).Error; err != nil {
+	if len(updates) > 0 {
+		if err := tx.Model(&model.Channel{}).Where("id = ?", req.ID).Updates(updates.gormMap()).Error; err != nil {
 			tx.Rollback()
 			return nil, fmt.Errorf("failed to update channel: %w", err)
 		}
@@ -321,16 +270,10 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 	// 更新 keys（逐条，只更新提供的字段）
 	if len(req.KeysToUpdate) > 0 {
 		for _, ku := range req.KeysToUpdate {
-			updates := map[string]interface{}{}
-			if ku.Enabled != nil {
-				updates["enabled"] = *ku.Enabled
-			}
-			if ku.ChannelKey != nil {
-				updates["channel_key"] = *ku.ChannelKey
-			}
-			if ku.Remark != nil {
-				updates["remark"] = *ku.Remark
-			}
+			updates := newPartialUpdate()
+			updates.set(&model.ChannelKey{}, "enabled", ku.Enabled)
+			updates.set(&model.ChannelKey{}, "channel_key", ku.ChannelKey)
+			updates.set(&model.ChannelKey{}, "remark", ku.Remark)
 			if ku.Weight != nil {
 				w := *ku.Weight
 				if w <= 0 {
@@ -340,15 +283,15 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 			}
 			if ku.ClearRateLimitCooldown {
 				updates["rate_limit_cooldown_sec"] = nil
-			} else if ku.RateLimitCooldownSec != nil {
-				updates["rate_limit_cooldown_sec"] = *ku.RateLimitCooldownSec
+			} else {
+				updates.set(&model.ChannelKey{}, "rate_limit_cooldown_sec", ku.RateLimitCooldownSec)
 			}
 			if len(updates) == 0 {
 				continue
 			}
 			if err := tx.Model(&model.ChannelKey{}).
 				Where("id = ? AND channel_id = ?", ku.ID, req.ID).
-				Updates(updates).Error; err != nil {
+				Updates(updates.gormMap()).Error; err != nil {
 				tx.Rollback()
 				return nil, fmt.Errorf("failed to update channel key %d: %w", ku.ID, err)
 			}
@@ -383,9 +326,10 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 		return nil, err
 	}
 
-	channel, _ := channelCache.Get(req.ID)
+	cached, _ := channelCache.Get(req.ID)
+	channel = &cached
 	HealthNotify()
-	return &channel, nil
+	return channel, nil
 }
 
 func ChannelEnabled(id int, enabled bool, ctx context.Context) error {
@@ -406,7 +350,7 @@ func ChannelEnabled(id int, enabled bool, ctx context.Context) error {
 	return nil
 }
 
-func ChannelDel(id int, ctx context.Context) error {
+func ChannelDel(id int, ctx context.Context) (err error) {
 	ch, ok := channelCache.Get(id)
 	if !ok {
 		return fmt.Errorf("channel not found")
@@ -419,6 +363,7 @@ func ChannelDel(id int, ctx context.Context) error {
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
+			err = fmt.Errorf("channel delete panicked: %v", r)
 		}
 	}()
 
@@ -461,12 +406,17 @@ func ChannelDel(id int, ctx context.Context) error {
 
 	// 删除缓存
 	channelCache.Del(id)
+	keyIDs := make([]int, 0, len(ch.Keys))
 	for _, k := range ch.Keys {
 		if k.ID != 0 {
 			channelKeyCache.Del(k.ID)
+			keyIDs = append(keyIDs, k.ID)
 		}
 	}
-	StatsChannelDel(id)
+	channelKeyDirty.Remove(keyIDs...)
+	channelUpdateLocks.Delete(id)
+	// DB 删除已在事务内完成，这里只清缓存，避免重复 DELETE
+	StatsChannelCacheRemove(id)
 
 	HealthNotify()
 
@@ -556,9 +506,7 @@ func channelRefreshCache(ctx context.Context) error {
 	}
 	channelCache.Clear()
 	channelKeyCache.Clear()
-	channelKeyCacheNeedUpdateLock.Lock()
-	channelKeyCacheNeedUpdate = make(map[int]struct{})
-	channelKeyCacheNeedUpdateLock.Unlock()
+	channelKeyDirty.Clear()
 	for _, channel := range channels {
 		channelCache.Set(channel.ID, channel)
 		for _, k := range channel.Keys {
@@ -604,10 +552,7 @@ func channelRefreshCacheByID(id int, ctx context.Context) error {
 		if rt, ok := runtimeByID[k.ID]; ok {
 			// Keep live accounting / rate-limit state over DB snapshot when dirty
 			// was just flushed OR concurrent ApplyUpdate raced the flush.
-			channelKeyCacheNeedUpdateLock.Lock()
-			_, stillDirty := channelKeyCacheNeedUpdate[k.ID]
-			channelKeyCacheNeedUpdateLock.Unlock()
-			if stillDirty {
+			if channelKeyDirty.IsDirty(k.ID) {
 				k.TotalCost = rt.TotalCost
 				k.StatusCode = rt.StatusCode
 				k.LastUseTimeStamp = rt.LastUseTimeStamp

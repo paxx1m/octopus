@@ -157,14 +157,28 @@ func RelayLogAdd(ctx context.Context, relayLog model.RelayLog) error {
 	relayLog.ID = snowflake.GenerateID()
 	relayLog.RequestContent = truncateLogContent(relayLog.RequestContent)
 	relayLog.ResponseContent = truncateLogContent(relayLog.ResponseContent)
-	go notifySubscribers(relayLog)
+
+	// 无订阅者时跳过 goroutine 开销（relay 路径每请求一次）
+	relayLogSubscribersLock.RLock()
+	hasSubscribers := len(relayLogSubscribers) > 0
+	relayLogSubscribersLock.RUnlock()
+	if hasSubscribers {
+		go notifySubscribers(relayLog)
+	}
 
 	relayLogCacheLock.Lock()
 	relayLogCache = append(relayLogCache, relayLog)
 	if len(relayLogCache) >= maxSize {
 		if enabled {
 			relayLogCacheLock.Unlock()
-			return relayLogFlushToDB(ctx)
+			// 异步刷库，避免请求路径每攒满一批就阻塞在 DB 写入上；
+			// flushToDB 内部先摘出快照再写库，与后台任务并发安全。
+			go func() {
+				if err := relayLogFlushToDB(context.Background()); err != nil {
+					log.Errorf("failed to flush relay logs: %v", err)
+				}
+			}()
+			return nil
 		}
 		// 如果未启用日志保存，移除最旧的日志，保留最新的日志用于实时查询
 		// 重建底层数组而不是 reslice，避免数组持续引用旧日志的 Request/ResponseContent 导致内存无法回收

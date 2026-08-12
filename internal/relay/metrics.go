@@ -26,6 +26,9 @@ type RelayMetrics struct {
 	InternalRequest  *llm.Request
 	InternalResponse []byte
 
+	// RawBody 原始 JSON 请求体（rerank 透传路径使用；InternalRequest 为 nil 时用于日志请求内容）。
+	RawBody []byte
+
 	// 统计指标
 	ActualModel string
 	Stats       model.StatsMetrics
@@ -76,7 +79,7 @@ func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attemp
 	}
 	if success {
 		globalStats.RequestSuccess = 1
-	// 仅成功且有输出 token 时计入生成窗口（用于 Tokens/s）
+		// 仅成功且有输出 token 时计入生成窗口（用于 Tokens/s）
 		if m.Stats.OutputToken > 0 && outputTimeMs > 0 {
 			globalStats.OutputTime = outputTimeMs
 		}
@@ -87,7 +90,7 @@ func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attemp
 	channelID, channelName := finalChannel(attempts)
 	op.StatsTotalUpdate(globalStats)
 	op.StatsHourlyUpdate(globalStats)
-	op.StatsDailyUpdate(context.Background(), globalStats)
+	op.StatsDailyUpdate(globalStats)
 	op.StatsAPIKeyUpdate(m.APIKeyID, globalStats)
 	if channelID > 0 {
 		// 通道成功/失败和等待时间在每次 attempt 结束时已记录；这里仅把最终响应的用量成本归到实际通道，避免重复计数。
@@ -192,7 +195,10 @@ func (m *RelayMetrics) saveLog(ctx context.Context, err error, duration time.Dur
 
 func (m *RelayMetrics) requestContent() string {
 	if m.InternalRequest == nil {
-		return ""
+		if m.RawBody == nil {
+			return ""
+		}
+		return string(m.RawBody)
 	}
 
 	reqJSON, err := json.Marshal(filterRequestForLog(m.InternalRequest))

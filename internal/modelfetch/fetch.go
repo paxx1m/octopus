@@ -1,4 +1,5 @@
-package helper
+// Package modelfetch 从上游渠道拉取模型列表（OpenAI / Gemini / Anthropic 风格）。
+package modelfetch
 
 import (
 	"context"
@@ -9,24 +10,26 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/bestruirui/octopus/internal/client"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/dlclark/regexp2"
 	"github.com/looplj/axonhub/llm"
 )
 
+// FetchModels 拉取渠道模型列表，可选按 match_regex 过滤。
 func FetchModels(ctx context.Context, request model.Channel) ([]string, error) {
-	client, err := ChannelHttpClient(&request)
+	httpClient, err := client.ChannelHttpClient(&request)
 	if err != nil {
 		return nil, err
 	}
 	fetchModel := make([]string, 0)
 	switch request.Type {
 	case llm.APIFormatAnthropicMessage:
-		fetchModel, err = fetchAnthropicModels(client, ctx, request)
+		fetchModel, err = fetchAnthropicModels(httpClient, ctx, request)
 	case llm.APIFormatGeminiContents:
-		fetchModel, err = fetchGeminiModels(client, ctx, request)
+		fetchModel, err = fetchGeminiModels(httpClient, ctx, request)
 	default:
-		fetchModel, err = fetchOpenAIModels(client, ctx, request)
+		fetchModel, err = fetchOpenAIModels(httpClient, ctx, request)
 	}
 	if err != nil {
 		return nil, err

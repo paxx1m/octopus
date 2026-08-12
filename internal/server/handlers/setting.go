@@ -17,32 +17,34 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func init() {
-	router.NewGroupRouter("/api/v1/setting").
-		Use(middleware.Auth()).
-		AddRoute(
-			router.NewRoute("/list", http.MethodGet).
-				Handle(getSettingList),
-		).
-		AddRoute(
-			router.NewRoute("/set", http.MethodPost).
-				Use(middleware.RequireJSON()).
-				Handle(setSetting),
-		).
-		AddRoute(
-			router.NewRoute("/export", http.MethodGet).
-				Handle(exportDB),
-		).
-		AddRoute(
-			router.NewRoute("/import", http.MethodPost).
-				Handle(importDB),
-		)
+func RegisterSettingRoutes() []*router.GroupRouter {
+	return []*router.GroupRouter{
+		router.NewGroupRouter("/api/v1/setting").
+			Use(middleware.Auth()).
+			AddRoute(
+				router.NewRoute("/list", http.MethodGet).
+					Handle(getSettingList),
+			).
+			AddRoute(
+				router.NewRoute("/set", http.MethodPost).
+					Use(middleware.RequireJSON()).
+					Handle(setSetting),
+			).
+			AddRoute(
+				router.NewRoute("/export", http.MethodGet).
+					Handle(exportDB),
+			).
+			AddRoute(
+				router.NewRoute("/import", http.MethodPost).
+					Handle(importDB),
+			),
+	}
 }
 
 func getSettingList(c *gin.Context) {
 	settings, err := op.SettingList(c.Request.Context())
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	resp.Success(c, settings)
@@ -50,8 +52,7 @@ func getSettingList(c *gin.Context) {
 
 func setSetting(c *gin.Context) {
 	var setting model.Setting
-	if err := c.ShouldBindJSON(&setting); err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+	if !bindJSON(c, &setting) {
 		return
 	}
 	if err := setting.Validate(); err != nil {
@@ -59,30 +60,19 @@ func setSetting(c *gin.Context) {
 		return
 	}
 	if err := op.SettingSetString(setting.Key, setting.Value); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 	switch setting.Key {
 	case model.SettingKeyModelInfoUpdateInterval:
-		hours, err := strconv.Atoi(setting.Value)
-		if err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
-			return
-		}
+		// Validate 已保证为可解析整数，解析失败分支不可达
+		hours, _ := strconv.Atoi(setting.Value)
 		task.Update(string(setting.Key), time.Duration(hours)*time.Hour)
 	case model.SettingKeySyncLLMInterval:
-		hours, err := strconv.Atoi(setting.Value)
-		if err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
-			return
-		}
+		hours, _ := strconv.Atoi(setting.Value)
 		task.Update(string(setting.Key), time.Duration(hours)*time.Hour)
 	case model.SettingKeyStatsSaveInterval:
-		minutes, err := strconv.Atoi(setting.Value)
-		if err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
-			return
-		}
+		minutes, _ := strconv.Atoi(setting.Value)
 		task.Update(task.TaskStatsSave, time.Duration(minutes)*time.Minute)
 	}
 	resp.Success(c, setting)
@@ -94,7 +84,7 @@ func exportDB(c *gin.Context) {
 
 	dump, err := op.DBExportAll(c.Request.Context(), includeLogs, includeStats)
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		serverError(c, err)
 		return
 	}
 

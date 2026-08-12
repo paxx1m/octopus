@@ -49,25 +49,64 @@ func getOrCreateEntry(key string) *circuitEntry {
 	return actual.(*circuitEntry)
 }
 
+// 熔断配置带 TTL 缓存：失败/检查路径在持锁状态下频繁读取设置，
+// 用短 TTL 缓存避免每次失败都做 SettingGetInt + strconv.Atoi。
+const circuitSettingsTTL = 10 * time.Second
+
+var (
+	circuitSettingsMu    sync.Mutex
+	circuitSettingsCache = struct {
+		threshold   int64
+		cooldown    int64
+		maxCooldown int64
+		refreshedAt time.Time
+	}{threshold: 5, cooldown: 60, maxCooldown: 600}
+)
+
+func circuitSettings() (threshold, cooldown, maxCooldown int64) {
+	circuitSettingsMu.Lock()
+	defer circuitSettingsMu.Unlock()
+
+	if time.Since(circuitSettingsCache.refreshedAt) < circuitSettingsTTL {
+		return circuitSettingsCache.threshold, circuitSettingsCache.cooldown, circuitSettingsCache.maxCooldown
+	}
+
+	cache := struct {
+		threshold   int64
+		cooldown    int64
+		maxCooldown int64
+		refreshedAt time.Time
+	}{refreshedAt: time.Now()}
+
+	if v, err := op.SettingGetInt(model.SettingKeyCircuitBreakerThreshold); err == nil && v > 0 {
+		cache.threshold = int64(v)
+	} else {
+		cache.threshold = 5
+	}
+	if v, err := op.SettingGetInt(model.SettingKeyCircuitBreakerCooldown); err == nil && v > 0 {
+		cache.cooldown = int64(v)
+	} else {
+		cache.cooldown = 60
+	}
+	if v, err := op.SettingGetInt(model.SettingKeyCircuitBreakerMaxCooldown); err == nil && v > 0 {
+		cache.maxCooldown = int64(v)
+	} else {
+		cache.maxCooldown = 600
+	}
+
+	circuitSettingsCache = cache
+	return cache.threshold, cache.cooldown, cache.maxCooldown
+}
+
 // getThreshold 获取熔断阈值配置
 func getThreshold() int64 {
-	v, err := op.SettingGetInt(model.SettingKeyCircuitBreakerThreshold)
-	if err != nil || v <= 0 {
-		return 5
-	}
-	return int64(v)
+	threshold, _, _ := circuitSettings()
+	return threshold
 }
 
 // GetCooldown 获取当前冷却时间（带指数退避）
 func GetCooldown(tripCount int) time.Duration {
-	base, err := op.SettingGetInt(model.SettingKeyCircuitBreakerCooldown)
-	if err != nil || base <= 0 {
-		base = 60
-	}
-	maxCooldown, err := op.SettingGetInt(model.SettingKeyCircuitBreakerMaxCooldown)
-	if err != nil || maxCooldown <= 0 {
-		maxCooldown = 600
-	}
+	_, base, maxCooldown := circuitSettings()
 
 	// 指数退避：baseCooldown * 2^(tripCount-1)
 	cooldown := base

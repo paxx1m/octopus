@@ -1,66 +1,16 @@
-package helper
+package op
 
 import (
 	"context"
-	"errors"
-	"net/http"
 	"strings"
 
-	"github.com/bestruirui/octopus/internal/client"
 	"github.com/bestruirui/octopus/internal/model"
-	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/bestruirui/octopus/internal/utils/xstrings"
 	"github.com/dlclark/regexp2"
 )
 
-func ChannelHttpClient(channel *model.Channel) (*http.Client, error) {
-	if channel == nil {
-		return nil, errors.New("channel is nil")
-	}
-	if !channel.Proxy {
-		return client.GetHTTPClientSystemProxy(false)
-	} else if channel.ChannelProxy == nil || strings.TrimSpace(*channel.ChannelProxy) == "" {
-		return client.GetHTTPClientSystemProxy(true)
-	} else {
-		return client.GetHTTPClientCustomProxy(strings.TrimSpace(*channel.ChannelProxy))
-	}
-}
-
-func ChannelBaseUrlDelayUpdate(channel *model.Channel, ctx context.Context) {
-	if channel == nil {
-		return
-	}
-	// 禁用渠道不参与探测，避免无意义 HEAD 与 connection refused 噪音
-	if !channel.Enabled {
-		log.Debugf("skip base url delay for disabled channel=%d", channel.ID)
-		return
-	}
-	newBaseUrls := make([]model.BaseUrl, 0, len(channel.BaseUrls))
-	for _, baseUrl := range channel.BaseUrls {
-		if baseUrl.URL == "" {
-			continue
-		}
-		httpClient, err := ChannelHttpClient(channel)
-		if err != nil {
-			log.Warnf("failed to get http client (channel=%d): %v", channel.ID, err)
-			continue
-		}
-		delay, err := GetUrlDelay(httpClient, baseUrl.URL, ctx)
-		if err != nil {
-			log.Warnf("failed to get url delay (channel=%d): %v", channel.ID, err)
-			continue
-		}
-		newBaseUrls = append(newBaseUrls, model.BaseUrl{
-			URL:   baseUrl.URL,
-			Delay: delay,
-		})
-	}
-	if len(newBaseUrls) > 0 {
-		op.ChannelBaseUrlUpdate(channel.ID, newBaseUrls)
-	}
-}
-
+// ChannelAutoGroup 按渠道 auto_group 规则将模型自动加入匹配的分组。
 func ChannelAutoGroup(channel *model.Channel, ctx context.Context) {
 	if channel == nil {
 		return
@@ -68,7 +18,7 @@ func ChannelAutoGroup(channel *model.Channel, ctx context.Context) {
 	if channel.AutoGroup == model.AutoGroupTypeNone {
 		return
 	}
-	groups, err := op.GroupList(ctx)
+	groups, err := GroupList(ctx)
 	if err != nil {
 		log.Warnf("get group list failed: %v", err)
 		return
@@ -136,7 +86,7 @@ func ChannelAutoGroup(channel *model.Channel, ctx context.Context) {
 					ModelName: modelName,
 				})
 			}
-			if err := op.GroupItemBatchAdd(group.ID, items, ctx); err != nil {
+			if err := GroupItemBatchAdd(group.ID, items, ctx); err != nil {
 				log.Warnf("group item batch add failed (channel=%d group=%d): %v", channel.ID, group.ID, err)
 			}
 		}

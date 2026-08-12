@@ -1,6 +1,7 @@
 package op
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 var userCache model.User
@@ -17,7 +19,12 @@ func UserInit() error {
 	userCacheLock.Lock()
 	defer userCacheLock.Unlock()
 
-	if err := db.GetDB().First(&userCache).Error; err == nil {
+	err := db.GetDB().First(&userCache).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		// 数据库故障等真实错误不能当作「无用户」而创建默认账号
+		return fmt.Errorf("failed to load user: %w", err)
+	}
+	if err == nil {
 		// 已有用户仍使用默认密码 admin 时，强制下次改密
 		if !userCache.MustChangePassword && userCache.ComparePassword("admin") == nil {
 			if err := db.GetDB().Model(&model.User{}).Where("id = ?", userCache.ID).
@@ -101,11 +108,12 @@ func UserVerify(username, password string) error {
 	userCacheLock.RLock()
 	defer userCacheLock.RUnlock()
 
+	// 统一错误文案，避免用户名枚举
 	if username != userCache.Username {
-		return fmt.Errorf("incorrect username")
+		return fmt.Errorf("invalid username or password")
 	}
 	if err := userCache.ComparePassword(password); err != nil {
-		return fmt.Errorf("incorrect password")
+		return fmt.Errorf("invalid username or password")
 	}
 	return nil
 }
