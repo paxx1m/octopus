@@ -19,6 +19,8 @@ func newInbound(format llm.APIFormat) transformer.Inbound {
 		return openai.NewInboundTransformer()
 	case llm.APIFormatOpenAIResponse:
 		return responses.NewInboundTransformer()
+	case llm.APIFormatOpenAIResponseCompact:
+		return responses.NewCompactInboundTransformer()
 	case llm.APIFormatOpenAIEmbedding:
 		return openai.NewEmbeddingInboundTransformer()
 	case llm.APIFormatOpenAIImageGeneration:
@@ -86,6 +88,16 @@ func newOutbound(channelType llm.APIFormat, request *llm.Request, baseURL, key s
 			return gemini.NewOutboundTransformer(baseURL, key)
 		case dbmodel.ChannelTypeDoubao:
 			return doubao.NewOutboundTransformer(baseURL, key)
+		default:
+			return nil, fmt.Errorf("channel type %s is not compatible with %s request", channelType, requestType)
+		}
+	case llm.RequestTypeCompact:
+		// compact 仅 openai/responses 出站支持（含 codex）
+		switch channelType {
+		case llm.APIFormatOpenAIChatCompletion,
+			llm.APIFormatOpenAIResponse,
+			llm.APIFormatOpenAIResponseCompact:
+			return responses.NewOutboundTransformer(baseURL, key)
 		default:
 			return nil, fmt.Errorf("channel type %s is not compatible with %s request", channelType, requestType)
 		}
