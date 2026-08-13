@@ -1,74 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslations } from 'use-intl';
 import { Monitor, Globe, Clock, Shield, HelpCircle, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { useSettingList, useSetSetting, SettingKey } from '@/api/endpoints/setting';
-import { toast } from '@/components/common/Toast';
+import { SettingKey } from '@/api/endpoints/setting';
+import { SettingCard, SettingRow } from '@/components/common/SettingCard';
+import { useSettingField } from '@/hooks/useSettingField';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/animate-ui/components/animate/tooltip';
 
 export function SettingSystem() {
     const t = useTranslations('setting');
-    const { data: settings } = useSettingList();
-    const setSetting = useSetSetting();
 
-    const [proxyUrl, setProxyUrl] = useState('');
-    const [statsSaveInterval, setStatsSaveInterval] = useState('');
-    const [corsAllowOrigins, setCorsAllowOrigins] = useState('');
+    const proxyUrl = useSettingField(SettingKey.ProxyURL);
+    const statsSaveInterval = useSettingField(SettingKey.StatsSaveInterval);
+    const keyRateLimitCooldown = useSettingField(SettingKey.ChannelKeyRateLimitCooldown);
+
+    // CORS 白名单有特殊的增删交互，保留独立状态管理
+    const corsField = useSettingField(SettingKey.CORSAllowOrigins);
     const [corsInputValue, setCorsInputValue] = useState('');
-    const [keyRateLimitCooldown, setKeyRateLimitCooldown] = useState('');
-
-    const initialProxyUrl = useRef('');
-    const initialStatsSaveInterval = useRef('');
-    const initialCorsAllowOrigins = useRef('');
-    const initialKeyRateLimitCooldown = useRef('');
-
-    useEffect(() => {
-        if (settings) {
-            const proxy = settings.find(s => s.key === SettingKey.ProxyURL);
-            const interval = settings.find(s => s.key === SettingKey.StatsSaveInterval);
-            const cors = settings.find(s => s.key === SettingKey.CORSAllowOrigins);
-            const keyCd = settings.find(s => s.key === SettingKey.ChannelKeyRateLimitCooldown);
-            if (proxy) {
-                queueMicrotask(() => setProxyUrl(proxy.value));
-                initialProxyUrl.current = proxy.value;
-            }
-            if (interval) {
-                queueMicrotask(() => setStatsSaveInterval(interval.value));
-                initialStatsSaveInterval.current = interval.value;
-            }
-            if (cors) {
-                queueMicrotask(() => setCorsAllowOrigins(cors.value));
-                initialCorsAllowOrigins.current = cors.value;
-            }
-            if (keyCd) {
-                queueMicrotask(() => setKeyRateLimitCooldown(keyCd.value));
-                initialKeyRateLimitCooldown.current = keyCd.value;
-            }
-        }
-    }, [settings]);
-
-    const handleSave = (key: string, value: string, initialValue: string) => {
-        if (value === initialValue) return;
-
-        setSetting.mutate({ key, value }, {
-            onSuccess: () => {
-                toast.success(t('saved'));
-                if (key === SettingKey.ProxyURL) {
-                    initialProxyUrl.current = value;
-                } else if (key === SettingKey.StatsSaveInterval) {
-                    initialStatsSaveInterval.current = value;
-                } else if (key === SettingKey.CORSAllowOrigins) {
-                    initialCorsAllowOrigins.current = value;
-                } else if (key === SettingKey.ChannelKeyRateLimitCooldown) {
-                    initialKeyRateLimitCooldown.current = value;
-                }
-            }
-        });
-    };
 
     const corsAllowOriginsList = useMemo(() => {
-        const value = corsAllowOrigins.trim();
+        const value = corsField.value.trim();
         if (!value) return [];
         if (value === '*') return ['*'];
         return Array.from(new Set(
@@ -77,7 +29,7 @@ export function SettingSystem() {
                 .map(item => item.trim())
                 .filter(Boolean)
         ));
-    }, [corsAllowOrigins]);
+    }, [corsField.value]);
 
     const corsAllowOriginsDisplay = useMemo(
         () => (corsAllowOriginsList.length > 0 ? corsAllowOriginsList.join(', ') : t('corsAllowOrigins.hint')),
@@ -91,8 +43,7 @@ export function SettingSystem() {
                 .filter(Boolean)
         ));
         const normalizedValue = normalizedOrigins.includes('*') ? '*' : normalizedOrigins.join(',');
-        setCorsAllowOrigins(normalizedValue);
-        handleSave(SettingKey.CORSAllowOrigins, normalizedValue, initialCorsAllowOrigins.current);
+        corsField.saveValue(normalizedValue);
     };
 
     const handleAddCorsOrigin = () => {
@@ -122,87 +73,76 @@ export function SettingSystem() {
     };
 
     return (
-        <div className="rounded-3xl border border-border bg-card p-6 space-y-5">
-            <h2 className="text-lg font-bold text-card-foreground flex items-center gap-2">
-                <Monitor className="h-5 w-5" />
-                {t('system')}
-            </h2>
-
-            {/* 代理地址 */}
-            <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                    <Globe className="h-5 w-5 text-muted-foreground" />
-                    <span className="text-sm font-medium">{t('proxyUrl.label')}</span>
-                </div>
+        <SettingCard icon={<Monitor className="h-5 w-5" />} title={t('system')}>
+            <SettingRow icon={<Globe className="h-5 w-5 text-muted-foreground" />} label={t('proxyUrl.label')}>
                 <Input
-                    value={proxyUrl}
-                    onChange={(e) => setProxyUrl(e.target.value)}
-                    onBlur={() => handleSave(SettingKey.ProxyURL, proxyUrl, initialProxyUrl.current)}
+                    value={proxyUrl.value}
+                    onChange={(e) => proxyUrl.setValue(e.target.value)}
+                    onBlur={proxyUrl.save}
                     placeholder={t('proxyUrl.placeholder')}
                     className="w-48 rounded-xl"
                 />
-            </div>
+            </SettingRow>
 
-            {/* 统计保存周期 */}
-            <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                    <Clock className="h-5 w-5 text-muted-foreground" />
-                    <span className="text-sm font-medium">{t('statsSaveInterval.label')}</span>
-                </div>
+            <SettingRow icon={<Clock className="h-5 w-5 text-muted-foreground" />} label={t('statsSaveInterval.label')}>
                 <Input
                     type="number"
-                    value={statsSaveInterval}
-                    onChange={(e) => setStatsSaveInterval(e.target.value)}
-                    onBlur={() => handleSave(SettingKey.StatsSaveInterval, statsSaveInterval, initialStatsSaveInterval.current)}
+                    value={statsSaveInterval.value}
+                    onChange={(e) => statsSaveInterval.setValue(e.target.value)}
+                    onBlur={statsSaveInterval.save}
                     placeholder={t('statsSaveInterval.placeholder')}
                     className="w-48 rounded-xl"
                 />
-            </div>
+            </SettingRow>
 
-            {/* 渠道 Key 429 默认冷却 */}
-            <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                    <Clock className="h-5 w-5 text-muted-foreground" />
-                    <span className="text-sm font-medium">{t('channelKeyRateLimitCooldown.label')}</span>
-                    <TooltipProvider>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <HelpCircle className="size-4 text-muted-foreground cursor-help" />
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                {t('channelKeyRateLimitCooldown.hint')}
-                            </TooltipContent>
-                        </Tooltip>
-                    </TooltipProvider>
-                </div>
+            <SettingRow
+                icon={
+                    <>
+                        <Clock className="h-5 w-5 text-muted-foreground" />
+                        <TooltipProvider>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <HelpCircle className="size-4 text-muted-foreground cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    {t('channelKeyRateLimitCooldown.hint')}
+                                </TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
+                    </>
+                }
+                label={t('channelKeyRateLimitCooldown.label')}
+            >
                 <Input
                     type="number"
-                    value={keyRateLimitCooldown}
-                    onChange={(e) => setKeyRateLimitCooldown(e.target.value)}
-                    onBlur={() => handleSave(SettingKey.ChannelKeyRateLimitCooldown, keyRateLimitCooldown, initialKeyRateLimitCooldown.current)}
+                    value={keyRateLimitCooldown.value}
+                    onChange={(e) => keyRateLimitCooldown.setValue(e.target.value)}
+                    onBlur={keyRateLimitCooldown.save}
                     placeholder={t('channelKeyRateLimitCooldown.placeholder')}
                     className="w-48 rounded-xl"
                 />
-            </div>
+            </SettingRow>
 
-            {/* CORS 跨域白名单 */}
-            <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                    <Shield className="h-5 w-5 text-muted-foreground" />
-                    <span className="text-sm font-medium">{t('corsAllowOrigins.label')}</span>
-                    <TooltipProvider>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <HelpCircle className="size-4 text-muted-foreground cursor-help" />
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                {t('corsAllowOrigins.hint')}
-                                <br />
-                                {t('corsAllowOrigins.example')}
-                            </TooltipContent>
-                        </Tooltip>
-                    </TooltipProvider>
-                </div>
+            <SettingRow
+                icon={
+                    <>
+                        <Shield className="h-5 w-5 text-muted-foreground" />
+                        <TooltipProvider>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <HelpCircle className="size-4 text-muted-foreground cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    {t('corsAllowOrigins.hint')}
+                                    <br />
+                                    {t('corsAllowOrigins.example')}
+                                </TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
+                    </>
+                }
+                label={t('corsAllowOrigins.label')}
+            >
                 <Popover>
                     <PopoverTrigger asChild>
                         <button
@@ -248,7 +188,7 @@ export function SettingSystem() {
                         </div>
                     </PopoverContent>
                 </Popover>
-            </div>
-        </div>
+            </SettingRow>
+        </SettingCard>
     );
 }

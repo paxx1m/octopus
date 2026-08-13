@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
@@ -109,7 +110,13 @@ func clonedDefaultTransport() (*http.Transport, error) {
 	if !ok {
 		return nil, fmt.Errorf("default transport is not *http.Transport")
 	}
-	return transport.Clone(), nil
+	cloned := transport.Clone()
+	// 提升对同一上游的并发连接复用，减少 TCP+TLS 握手开销。
+	// DefaultTransport 的 MaxIdleConnsPerHost 仅为 2，高并发转发同一上游时不够用。
+	cloned.MaxIdleConns = 1000
+	cloned.MaxIdleConnsPerHost = 100
+	cloned.IdleConnTimeout = 90 * time.Second
+	return cloned, nil
 }
 
 func newHTTPClientNoProxy() (*http.Client, error) {

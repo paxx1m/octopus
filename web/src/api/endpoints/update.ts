@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../client';
-import { logger } from '@/lib/logger';
+import { makeMutation } from '../mutation-helpers';
 
 /**
  * 后端 /api/v1/update 返回的最新发布信息
@@ -63,20 +63,10 @@ export function useNowVersion() {
  * });
  */
 export function useUpdateCore() {
-    const queryClient = useQueryClient();
-
-    return useMutation({
-        mutationFn: async () => {
-            return apiClient.post<string>('/api/v1/update');
-        },
-        onSuccess: (data) => {
-            logger.log('更新成功:', data);
-            queryClient.invalidateQueries({ queryKey: ['update', 'latest'] });
-            queryClient.invalidateQueries({ queryKey: ['update', 'now-version'] });
-        },
-        onError: (error) => {
-            logger.error('更新失败:', error);
-        },
+    return makeMutation<void, string>({
+        name: '更新',
+        mutationFn: () => apiClient.post<string>('/api/v1/update'),
+        invalidate: [['update', 'latest'], ['update', 'now-version']],
     });
 }
 

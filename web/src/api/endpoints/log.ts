@@ -1,8 +1,9 @@
 import type { InfiniteData } from '@tanstack/react-query';
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../client';
 import { useSSEStream } from './sse';
 import { logger } from '@/lib/logger';
+import { makeMutation } from '../mutation-helpers';
 import { useCallback, useMemo } from 'react';
 
 /**
@@ -57,19 +58,10 @@ export interface RelayLog {
  * clearLogs.mutate();
  */
 export function useClearLogs() {
-    const queryClient = useQueryClient();
-
-    return useMutation({
-        mutationFn: async () => {
-            return apiClient.delete<null>('/api/v1/log/clear');
-        },
-        onSuccess: () => {
-            logger.log('日志清空成功');
-            queryClient.invalidateQueries({ queryKey: ['logs'] });
-        },
-        onError: (error) => {
-            logger.error('日志清空失败:', error);
-        },
+    return makeMutation<void, null>({
+        name: '日志清空',
+        mutationFn: () => apiClient.delete<null>('/api/v1/log/clear'),
+        invalidate: [['logs']],
     });
 }
 

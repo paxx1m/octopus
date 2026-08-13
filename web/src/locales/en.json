@@ -47,7 +47,8 @@
         "neverExpire": "Never",
         "daysLeft": "days left",
         "expired": "Expired",
-        "supportedModels": "Supported Models"
+        "supportedModels": "Supported Models",
+        "copied": "{label} copied"
     },
     "navbar": {
         "home": "Home",
@@ -97,7 +98,11 @@
             "success": "Copied",
             "failed": "Copy failed",
             "noContent": "Nothing to copy"
-        }
+        },
+        "remove": "Remove",
+        "close": "Close",
+        "edit": "Edit",
+        "stats": "Stats"
     },
     "home": {
         "activity": {

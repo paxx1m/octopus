@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { useChangePassword, useAuth } from "@/api/endpoints/user"
 import Logo from "@/components/modules/logo"
 import { toast } from "@/components/common/Toast"
+import { validatePasswordChange } from "@/lib/validators"
 
 export function ForceChangePassword() {
   const t = useTranslations("login")
@@ -19,21 +20,14 @@ export function ForceChangePassword() {
   const [confirmPassword, setConfirmPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
 
-  const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
 
-    if (!oldPassword || !newPassword) {
-      setError(tSetting("account.password.newEmpty"))
-      return
-    }
-    if (newPassword !== confirmPassword) {
-      setError(tSetting("account.password.mismatch"))
-      return
-    }
-    if (newPassword.length < 6) {
-      setError(tSetting("account.password.tooShort"))
-      return
+    const errKey = validatePasswordChange(oldPassword, newPassword, confirmPassword);
+    if (errKey) {
+      setError(tSetting(`account.password.${errKey}`));
+      return;
     }
     if (newPassword === "admin") {
       setError(t("forceChange.defaultForbidden"))

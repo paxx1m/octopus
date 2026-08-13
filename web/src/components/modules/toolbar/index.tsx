@@ -344,3 +344,4 @@ export function Toolbar() {
 
 export { useSearchStore } from './search-store';
 export { useToolbarViewOptionsStore } from './view-options-store';
+export type { ToolbarPage } from './view-options-store';

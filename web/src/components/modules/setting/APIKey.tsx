@@ -139,6 +139,7 @@ function APIKeyKeyItem({
     isDeleting: boolean;
 }) {
     const t = useTranslations('setting');
+    const tc = useTranslations('common');
     const [confirmDelete, setConfirmDelete] = useState(false);
 
     return (
@@ -158,7 +159,7 @@ function APIKeyKeyItem({
                     layoutId={statsLayoutId}
                     onClick={onViewStats}
                     className="flex size-8 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-95"
-                    title="Stats"
+                    title={tc("stats")}
                 >
                     <Info className="size-4" />
                 </motion.button>
@@ -167,7 +168,7 @@ function APIKeyKeyItem({
                     layoutId={editLayoutId}
                     onClick={onEdit}
                     className="flex size-8 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-95"
-                    title="Edit"
+                    title={tc("edit")}
                 >
                     <Pencil className="size-4" />
                 </motion.button>
@@ -400,6 +401,7 @@ function APIKeyPanelBase({
 
 function APIKeyDialogPanel() {
     const { setIsOpen } = useMorphingDialog();
+    const tc = useTranslations('common');
     return (
         <APIKeyPanelBase
             idPrefix="apikey-dialog"
@@ -410,7 +412,7 @@ function APIKeyDialogPanel() {
                     type="button"
                     onClick={() => setIsOpen(false)}
                     className="h-9 w-9 flex items-center justify-center rounded-lg bg-muted/60 text-muted-foreground transition-colors hover:bg-muted"
-                    title="Close"
+                    title={tc("close")}
                 >
                     <X className="size-4" />
                 </button>

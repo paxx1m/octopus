@@ -47,7 +47,8 @@
         "neverExpire": "永不過期",
         "daysLeft": "天後到期",
         "expired": "已過期",
-        "supportedModels": "支援的模型"
+        "supportedModels": "支援的模型",
+        "copied": "{label} 已複製"
     },
     "navbar": {
         "home": "主頁",
@@ -97,7 +98,11 @@
             "success": "複製成功",
             "failed": "複製失敗",
             "noContent": "無可複製內容"
-        }
+        },
+        "remove": "移除",
+        "close": "關閉",
+        "edit": "編輯",
+        "stats": "統計"
     },
     "home": {
         "activity": {

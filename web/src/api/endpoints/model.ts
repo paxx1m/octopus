@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../client';
-import { logger } from '@/lib/logger';
+import { makeMutation } from '../mutation-helpers';
 
 /**
  * LLM 价格信息
@@ -87,19 +87,10 @@ export function useModelChannelList() {
  * });
  */
 export function useUpdateModel() {
-    const queryClient = useQueryClient();
-
-    return useMutation({
-        mutationFn: async (data: LLMInfo) => {
-            return apiClient.post<LLMInfo>('/api/v1/model/update', data);
-        },
-        onSuccess: (data) => {
-            logger.log('模型更新成功:', data);
-            queryClient.invalidateQueries({ queryKey: ['models', 'list'] });
-        },
-        onError: (error) => {
-            logger.error('模型更新失败:', error);
-        },
+    return makeMutation<LLMInfo, LLMInfo>({
+        name: '模型更新',
+        mutationFn: (data) => apiClient.post<LLMInfo>('/api/v1/model/update', data),
+        invalidate: [['models', 'list']],
     });
 }
 
@@ -118,19 +109,10 @@ export function useUpdateModel() {
  * });
  */
 export function useCreateModel() {
-    const queryClient = useQueryClient();
-
-    return useMutation({
-        mutationFn: async (data: LLMInfo) => {
-            return apiClient.post<LLMInfo>('/api/v1/model/create', data);
-        },
-        onSuccess: (data) => {
-            logger.log('模型创建成功:', data);
-            queryClient.invalidateQueries({ queryKey: ['models', 'list'] });
-        },
-        onError: (error) => {
-            logger.error('模型创建失败:', error);
-        },
+    return makeMutation<LLMInfo, LLMInfo>({
+        name: '模型创建',
+        mutationFn: (data) => apiClient.post<LLMInfo>('/api/v1/model/create', data),
+        invalidate: [['models', 'list']],
     });
 }
 
@@ -143,44 +125,10 @@ export function useCreateModel() {
  * deleteModel.mutate('gpt-4'); // 删除名称为 'gpt-4' 的模型
  */
 export function useDeleteModel() {
-    const queryClient = useQueryClient();
-
-    return useMutation({
-        mutationFn: async (name: string) => {
-            return apiClient.post<null>('/api/v1/model/delete', { name });
-        },
-        onSuccess: () => {
-            logger.log('模型删除成功');
-            queryClient.invalidateQueries({ queryKey: ['models', 'list'] });
-        },
-        onError: (error) => {
-            logger.error('模型删除失败:', error);
-        },
-    });
-}
-
-/**
- * 更新 LLM 模型价格 Hook
- * 
- * @example
- * const updatePrice = useUpdateModelPrice();
- * 
- * updatePrice.mutate(); // 触发价格更新
- */
-export function useUpdateModelPrice() {
-    const queryClient = useQueryClient();
-
-    return useMutation({
-        mutationFn: async () => {
-            return apiClient.post<null>('/api/v1/model/update-price', {});
-        },
-        onSuccess: () => {
-            logger.log('模型价格更新成功');
-            queryClient.invalidateQueries({ queryKey: ['models', 'last-update-time'] });
-        },
-        onError: (error) => {
-            logger.error('模型价格更新失败:', error);
-        },
+    return makeMutation<string, null>({
+        name: '模型删除',
+        mutationFn: (name) => apiClient.post<null>('/api/v1/model/delete', { name }),
+        invalidate: [['models', 'list']],
     });
 }
 

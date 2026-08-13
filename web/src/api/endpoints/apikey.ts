@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../client';
-import { logger } from '@/lib/logger';
+import { makeMutation } from '../mutation-helpers';
 import { useAuthStore } from './user';
 import { StatsAPIKey, StatsAPIKeyFormatted, formatStatsMetrics } from './stats';
 
@@ -36,16 +36,16 @@ export interface APIKeyStatsResponseFormatted {
 export function useAPIKeyLogin() {
     const { setAPIKeyAuth, logout } = useAuthStore();
 
-    return useMutation({
-        mutationFn: async (apiKey: string) => {
+    return makeMutation<string, string>({
+        name: 'API Key 登录',
+        mutationFn: async (apiKey) => {
             // 先设置以便 apiClient 发送请求时带上 token
             setAPIKeyAuth(apiKey);
             await apiClient.get<null>('/api/v1/apikey/login');
             return apiKey;
         },
-        onError: (error) => {
+        onError: () => {
             logout();
-            logger.error('API Key 登录失败:', error);
         },
     });
 }
@@ -118,19 +118,10 @@ export function useAPIKeyList() {
  * });
  */
 export function useCreateAPIKey() {
-    const queryClient = useQueryClient();
-
-    return useMutation({
-        mutationFn: async (data: CreateAPIKeyRequest) => {
-            return apiClient.post<APIKey>('/api/v1/apikey/create', data);
-        },
-        onSuccess: (data) => {
-            logger.log('API Key 创建成功:', data);
-            queryClient.invalidateQueries({ queryKey: ['apikeys', 'list'] });
-        },
-        onError: (error) => {
-            logger.error('API Key 创建失败:', error);
-        },
+    return makeMutation<CreateAPIKeyRequest, APIKey>({
+        name: 'API Key 创建',
+        mutationFn: (data) => apiClient.post<APIKey>('/api/v1/apikey/create', data),
+        invalidate: [['apikeys', 'list']],
     });
 }
 
@@ -147,19 +138,10 @@ export function useCreateAPIKey() {
  * });
  */
 export function useUpdateAPIKey() {
-    const queryClient = useQueryClient();
-
-    return useMutation({
-        mutationFn: async (data: UpdateAPIKeyRequest) => {
-            return apiClient.post<APIKey>('/api/v1/apikey/update', data);
-        },
-        onSuccess: (data) => {
-            logger.log('API Key 更新成功:', data);
-            queryClient.invalidateQueries({ queryKey: ['apikeys', 'list'] });
-        },
-        onError: (error) => {
-            logger.error('API Key 更新失败:', error);
-        },
+    return makeMutation<UpdateAPIKeyRequest, APIKey>({
+        name: 'API Key 更新',
+        mutationFn: (data) => apiClient.post<APIKey>('/api/v1/apikey/update', data),
+        invalidate: [['apikeys', 'list']],
     });
 }
 
@@ -172,18 +154,9 @@ export function useUpdateAPIKey() {
  * deleteAPIKey.mutate(1); // 删除 ID 为 1 的 API Key
  */
 export function useDeleteAPIKey() {
-    const queryClient = useQueryClient();
-
-    return useMutation({
-        mutationFn: async (id: number) => {
-            return apiClient.delete<null>(`/api/v1/apikey/delete/${id}`);
-        },
-        onSuccess: () => {
-            logger.log('API Key 删除成功');
-            queryClient.invalidateQueries({ queryKey: ['apikeys', 'list'] });
-        },
-        onError: (error) => {
-            logger.error('API Key 删除失败:', error);
-        },
+    return makeMutation<number, null>({
+        name: 'API Key 删除',
+        mutationFn: (id) => apiClient.delete<null>(`/api/v1/apikey/delete/${id}`),
+        invalidate: [['apikeys', 'list']],
     });
 }

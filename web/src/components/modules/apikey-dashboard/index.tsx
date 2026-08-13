@@ -44,7 +44,7 @@ export function APIKeyDashboard() {
         async (text: string, label: string) => {
             try {
                 await copyToClipboard(text);
-                toast.success(`${label} copied`);
+                toast.success(t('copied', { label }));
                 return true;
             } catch {
                 toast.error(t('error'));

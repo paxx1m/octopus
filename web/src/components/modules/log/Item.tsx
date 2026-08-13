@@ -10,7 +10,8 @@ import { type RelayLog, type ChannelAttempt } from '@/api/endpoints/log';
 import { getModelIcon } from '@/lib/model-icons';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { formatTokensPerSec, outputTokensPerSecond } from '@/lib/metrics';
+import { formatTokensPerSec, outputTokensPerSecond, formatAvgLatency } from '@/lib/metrics';
+import { useSettingStore } from '@/stores/setting';
 import { CopyIconButton } from '@/components/common/CopyButton';
 import { dialogPanelClass } from '@/components/common/DialogShell';
 import {
@@ -25,20 +26,17 @@ import {
 } from '@/components/ui/morphing-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/animate-ui/components/animate/tooltip';
 
-function formatTime(timestamp: number): string {
+function formatTime(timestamp: number, locale: string): string {
     const date = new Date(timestamp * 1000);
-    return date.toLocaleString('zh-CN', {
+    // useSettingStore 的 locale 用下划线（zh_hans），toLocaleString 需要 BCP 47 连字符（zh-Hans）
+    const bcp47 = locale.replace('_', '-');
+    return date.toLocaleString(bcp47, {
         month: '2-digit',
         day: '2-digit',
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
     });
-}
-
-function formatDuration(ms: number): string {
-    if (ms < 1000) return `${ms}ms`;
-    return `${(ms / 1000).toFixed(2)}s`;
 }
 
 interface RetryBadgeWithTooltipProps {
@@ -81,7 +79,7 @@ function RetryBadgeWithTooltip({ channelName, brandColor, attempts }: RetryBadge
                                     {attempt.channel_name}
                                 </span>
                                 <span className="text-[10px] text-muted-foreground">
-                                    {attempt.model_name} • {formatDuration(attempt.duration)}
+                                    {attempt.model_name} • {formatAvgLatency(attempt.duration)}
                                 </span>
                             </div>
                         </div>
@@ -186,6 +184,7 @@ function DeferredJsonContent({ content, fallbackText }: { content: string | unde
 
 export function LogCard({ log }: { log: RelayLog }) {
     const t = useTranslations('log.card');
+    const locale = useSettingStore((s) => s.locale);
     const { Avatar: ModelAvatar, color: brandColor } = useMemo(
         () => getModelIcon(log.actual_model_name),
         [log.actual_model_name]
@@ -243,7 +242,7 @@ export function LogCard({ log }: { log: RelayLog }) {
                             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-x-4 gap-y-2 text-xs tabular-nums text-muted-foreground">
                                 <div className="flex items-center gap-1.5">
                                     <Clock className="size-3.5 shrink-0" style={{ color: brandColor }} />
-                                    <span>{formatTime(log.time)}</span>
+                                    <span>{formatTime(log.time, locale)}</span>
                                 </div>
                                 {requestAPIKeyName && (
                                     <div className="flex items-center gap-1.5">
@@ -255,11 +254,11 @@ export function LogCard({ log }: { log: RelayLog }) {
                                 )}
                                 <div className="flex items-center gap-1.5">
                                     <Zap className="size-3.5 shrink-0 text-amber-500" />
-                                    <span>{t('firstToken')} {formatDuration(log.ftut)}</span>
+                                    <span>{t('firstToken')} {formatAvgLatency(log.ftut)}</span>
                                 </div>
                                 <div className="flex items-center gap-1.5">
                                     <Cpu className="size-3.5 shrink-0 text-blue-500" />
-                                    <span>{t('totalTime')} {formatDuration(log.use_time)}</span>
+                                    <span>{t('totalTime')} {formatAvgLatency(log.use_time)}</span>
                                 </div>
                                 <div className="flex items-center gap-1.5">
                                     <Gauge className="size-3.5 shrink-0 text-cyan-500" />
@@ -412,7 +411,7 @@ export function LogCard({ log }: { log: RelayLog }) {
                                                                                 ({attempt.model_name})
                                                                             </span>
                                                                             <span className="ml-auto text-muted-foreground tabular-nums font-mono">
-                                                                                {formatDuration(attempt.duration)}
+                                                                                {formatAvgLatency(attempt.duration)}
                                                                             </span>
                                                                         </div>
                                                                         {attempt.msg && (
@@ -464,7 +463,7 @@ export function LogCard({ log }: { log: RelayLog }) {
                         <div className="flex flex-wrap items-center gap-3 md:gap-4 pt-4 mt-auto text-xs text-muted-foreground shrink-0">
                             <div className="flex items-center gap-1.5">
                                 <Clock className="size-3.5" style={{ color: brandColor }} />
-                                <span className="tabular-nums">{formatTime(log.time)}</span>
+                                <span className="tabular-nums">{formatTime(log.time, locale)}</span>
                             </div>
                             {requestAPIKeyName && (
                                 <div className="flex min-w-0 items-center gap-1.5">
@@ -476,11 +475,11 @@ export function LogCard({ log }: { log: RelayLog }) {
                             )}
                             <div className="flex items-center gap-1.5">
                                 <Zap className="size-3.5 text-amber-500" />
-                                <span>{t('firstTokenTime')}: {formatDuration(log.ftut)}</span>
+                                <span>{t('firstTokenTime')}: {formatAvgLatency(log.ftut)}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                                 <Cpu className="size-3.5 text-blue-500" />
-                                <span>{t('totalTime')}: {formatDuration(log.use_time)}</span>
+                                <span>{t('totalTime')}: {formatAvgLatency(log.use_time)}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                                 <Gauge className="size-3.5 text-cyan-500" />

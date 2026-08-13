@@ -1,41 +1,27 @@
-import { useMemo } from 'react';
 import { useChannelList } from '@/api/endpoints/channel';
 import { Card } from './Card';
-import { useSearchStore, useToolbarViewOptionsStore } from '@/components/modules/toolbar';
+import { useFilteredList } from '@/hooks/useFilteredList';
 import { VirtualizedGrid } from '@/components/common/VirtualizedGrid';
 
 export function Channel() {
     const { data: channelsData } = useChannelList();
-    const pageKey = 'channel' as const;
-    const searchTerm = useSearchStore((s) => s.getSearchTerm(pageKey));
-    const layout = useToolbarViewOptionsStore((s) => s.getLayout(pageKey));
-    const sortField = useToolbarViewOptionsStore((s) => s.getSortField(pageKey));
-    const sortOrder = useToolbarViewOptionsStore((s) => s.getSortOrder(pageKey));
-    const filter = useToolbarViewOptionsStore((s) => s.channelFilter);
 
-    const sortedChannels = useMemo(() => {
-        if (!channelsData) return [];
-        return [...channelsData].sort((a, b) => {
-            const diff = sortField === 'name'
-                ? a.raw.name.localeCompare(b.raw.name)
-                : a.raw.id - b.raw.id;
-            return sortOrder === 'asc' ? diff : -diff;
-        });
-    }, [channelsData, sortField, sortOrder]);
-
-    const visibleChannels = useMemo(() => {
-        const term = searchTerm.toLowerCase().trim();
-        const byName = !term ? sortedChannels : sortedChannels.filter((c) => c.raw.name.toLowerCase().includes(term));
-
-        if (filter === 'enabled') return byName.filter((c) => c.raw.enabled);
-        if (filter === 'disabled') return byName.filter((c) => !c.raw.enabled);
-
-        return byName;
-    }, [sortedChannels, searchTerm, filter]);
+    const { visibleItems, layout } = useFilteredList({
+        pageKey: 'channel',
+        items: channelsData,
+        getName: (c) => c.raw.name,
+        getId: (c) => c.raw.id,
+        sortField: true,
+        extraFilter: (items, filter) => {
+            if (filter === 'enabled') return items.filter((c) => c.raw.enabled);
+            if (filter === 'disabled') return items.filter((c) => !c.raw.enabled);
+            return items;
+        },
+    });
 
     return (
         <VirtualizedGrid
-            items={visibleChannels}
+            items={visibleItems}
             layout={layout}
             columns={{ default: 1, md: 2, lg: 3 }}
             estimateItemHeight={216}

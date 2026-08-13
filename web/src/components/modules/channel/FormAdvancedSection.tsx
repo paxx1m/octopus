@@ -26,6 +26,7 @@ type Props = {
 
 export function FormAdvancedSection({ formData, onFormDataChange, idPrefix }: Props) {
     const t = useTranslations('channel.form');
+    const tc = useTranslations('common');
 
     const handleAddHeader = () => {
         onFormDataChange({
@@ -189,7 +190,7 @@ export function FormAdvancedSection({ formData, onFormDataChange, idPrefix }: Pr
                                         onClick={() => handleRemoveHeader(idx)}
                                         disabled={(formData.custom_header ?? []).length <= 1}
                                         className="h-8 w-8 rounded-xl p-0 text-muted-foreground hover:bg-transparent hover:text-destructive disabled:opacity-40"
-                                        title="Remove"
+                                        title={tc("remove")}
                                     >
                                         <X className="h-4 w-4" />
                                     </Button>

@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../client';
-import { logger } from '@/lib/logger';
+import { makeMutation } from '../mutation-helpers';
 
 /**
  * 分组项信息
@@ -107,19 +107,10 @@ export function useGroupList() {
  * });
  */
 export function useCreateGroup() {
-    const queryClient = useQueryClient();
-
-    return useMutation({
-        mutationFn: async (data: Group) => {
-            return apiClient.post<Group>('/api/v1/group/create', data);
-        },
-        onSuccess: (data) => {
-            logger.log('分组创建成功:', data);
-            queryClient.invalidateQueries({ queryKey: ['groups', 'list'] });
-        },
-        onError: (error) => {
-            logger.error('分组创建失败:', error);
-        },
+    return makeMutation<Group, Group>({
+        name: '分组创建',
+        mutationFn: (data) => apiClient.post<Group>('/api/v1/group/create', data),
+        invalidate: [['groups', 'list']],
     });
 }
 
@@ -138,19 +129,10 @@ export function useCreateGroup() {
  * });
  */
 export function useUpdateGroup() {
-    const queryClient = useQueryClient();
-
-    return useMutation({
-        mutationFn: async (data: GroupUpdateRequest) => {
-            return apiClient.post<Group>('/api/v1/group/update', data);
-        },
-        onSuccess: (data) => {
-            logger.log('分组更新成功:', data);
-            queryClient.invalidateQueries({ queryKey: ['groups', 'list'] });
-        },
-        onError: (error) => {
-            logger.error('分组更新失败:', error);
-        },
+    return makeMutation<GroupUpdateRequest, Group>({
+        name: '分组更新',
+        mutationFn: (data) => apiClient.post<Group>('/api/v1/group/update', data),
+        invalidate: [['groups', 'list']],
     });
 }
 
@@ -163,19 +145,10 @@ export function useUpdateGroup() {
  * deleteGroup.mutate(1); // 删除 ID 为 1 的分组
  */
 export function useDeleteGroup() {
-    const queryClient = useQueryClient();
-
-    return useMutation({
-        mutationFn: async (id: number) => {
-            return apiClient.delete<null>(`/api/v1/group/delete/${id}`);
-        },
-        onSuccess: () => {
-            logger.log('分组删除成功');
-            queryClient.invalidateQueries({ queryKey: ['groups', 'list'] });
-        },
-        onError: (error) => {
-            logger.error('分组删除失败:', error);
-        },
+    return makeMutation<number, null>({
+        name: '分组删除',
+        mutationFn: (id) => apiClient.delete<null>(`/api/v1/group/delete/${id}`),
+        invalidate: [['groups', 'list']],
     });
 }
 

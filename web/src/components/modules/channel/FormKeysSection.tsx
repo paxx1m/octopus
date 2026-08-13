@@ -36,6 +36,7 @@ function keyRowId(k: ChannelKeyFormItem, idx: number) {
 
 export function FormKeysSection({ formData, onFormDataChange, idPrefix }: Props) {
     const t = useTranslations('channel.form');
+    const tc = useTranslations('common');
     const [keyBulkMode, setKeyBulkMode] = useState(false);
     const [bulkText, setBulkText] = useState('');
     const [expandedKeyIds, setExpandedKeyIds] = useState<Set<string>>(() => new Set());
@@ -385,7 +386,7 @@ export function FormKeysSection({ formData, onFormDataChange, idPrefix }: Props)
                                             size="sm"
                                             onClick={() => handleRemoveKey(idx)}
                                             className="h-8 w-8 rounded-xl p-0 text-muted-foreground hover:bg-transparent hover:text-destructive"
-                                            title="Remove"
+                                            title={tc("remove")}
                                         >
                                             <X className="h-4 w-4" />
                                         </Button>

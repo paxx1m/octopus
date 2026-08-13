@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
-import { useMutation } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { apiClient, setAuthStoreGetter } from '../client';
 import { logger } from '@/lib/logger';
+import { makeMutation } from '../mutation-helpers';
 
 /**
  * 用户登录请求
@@ -184,15 +184,11 @@ if (typeof window !== 'undefined') {
 export function useLogin() {
     const { setAuth } = useAuthStore();
 
-    return useMutation({
-        mutationFn: async (data: UserLoginRequest) => {
-            return apiClient.post<UserLoginResponse>('/api/v1/user/login', data);
-        },
+    return makeMutation<UserLoginRequest, UserLoginResponse>({
+        name: '登录',
+        mutationFn: (data) => apiClient.post<UserLoginResponse>('/api/v1/user/login', data),
         onSuccess: (data) => {
             setAuth(data.token, data.expire_at, !!data.must_change_password);
-        },
-        onError: (error) => {
-            logger.error('登录失败:', error);
         },
     });
 }
@@ -206,20 +202,17 @@ export function useLogin() {
  */
 export function useChangePassword() {
     const { setMustChangePassword } = useAuthStore();
-    return useMutation({
-        mutationFn: async (data: { oldPassword: string; newPassword: string }) => {
+    return makeMutation<{ oldPassword: string; newPassword: string }, string>({
+        name: '密码修改',
+        mutationFn: async (data) => {
             const payload: ChangePasswordRequest = {
                 old_password: data.oldPassword,
                 new_password: data.newPassword,
             };
             return apiClient.post<string>('/api/v1/user/change-password', payload);
         },
-        onSuccess: (message) => {
+        onSuccess: () => {
             setMustChangePassword(false);
-            logger.log('密码修改成功:', message);
-        },
-        onError: (error) => {
-            logger.error('密码修改失败:', error);
         },
     });
 }
@@ -232,18 +225,13 @@ export function useChangePassword() {
  * changeUsername.mutate({ newUsername: 'newname' });
  */
 export function useChangeUsername() {
-    return useMutation({
-        mutationFn: async (data: { newUsername: string }) => {
+    return makeMutation<{ newUsername: string }, string>({
+        name: '用户名修改',
+        mutationFn: async (data) => {
             const payload: ChangeUsernameRequest = {
                 new_username: data.newUsername,
             };
             return apiClient.post<string>('/api/v1/user/change-username', payload);
-        },
-        onSuccess: (message) => {
-            logger.log('用户名修改成功:', message);
-        },
-        onError: (error) => {
-            logger.error('用户名修改失败:', error);
         },
     });
 }
