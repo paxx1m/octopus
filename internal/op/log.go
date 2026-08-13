@@ -114,9 +114,9 @@ func RelayLogAdd(ctx context.Context, relayLog model.RelayLog) error {
 	relayLog.RequestContent = truncateLogContent(relayLog.RequestContent)
 	relayLog.ResponseContent = truncateLogContent(relayLog.ResponseContent)
 
-	// 无订阅者时跳过 goroutine 开销（relay 路径每请求一次）
+	// Notify 已是非阻塞（RLock + select default），直接同步调用，避免每请求起 goroutine 的 GC 压力。
 	if relayLogHub.HasSubscribers() {
-		go relayLogHub.Notify(relayLog)
+		relayLogHub.Notify(relayLog)
 	}
 
 	relayLogCacheLock.Lock()

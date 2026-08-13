@@ -45,6 +45,8 @@ func LoginRateLimit(maxAttempts int, window time.Duration) gin.HandlerFunc {
 		ip := c.ClientIP()
 		now := time.Now()
 
+		// 原子 check + 预扣：check 与 increment 在同一锁临界区内完成，
+		// 避免 check 后、increment 前并发请求全部通过检查的 TOCTOU 漏洞。
 		mu.Lock()
 		purgeExpired(now)
 		b, ok := byIP[ip]
@@ -58,31 +60,55 @@ func LoginRateLimit(maxAttempts int, window time.Duration) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		// 预扣一次：先按失败计；若最终成功则清零，若非登录失败状态则回滚。
+		b.count++
+		committed := false
 		mu.Unlock()
+
+		defer func() {
+			if committed {
+				return
+			}
+			// 未在下方显式提交（如 panic 或提前 return），回滚预扣。
+			mu.Lock()
+			if b2, ok := byIP[ip]; ok {
+				b2.count--
+			}
+			mu.Unlock()
+		}()
 
 		c.Next()
 
-		// 仅在登录失败时累加
-		if c.Writer.Status() == http.StatusUnauthorized || c.Writer.Status() == http.StatusBadRequest {
+		status := c.Writer.Status()
+		// 登录失败（401/400）：预扣已生效，标记为已提交。
+		if status == http.StatusUnauthorized || status == http.StatusBadRequest {
 			mu.Lock()
+			// 窗口可能已过期，需重置；否则预扣即本次失败计数。
 			if b2, ok := byIP[ip]; ok {
 				if time.Since(b2.windowAt) > window {
 					b2.count = 1
 					b2.windowAt = time.Now()
-				} else {
-					b2.count++
 				}
-			} else {
-				byIP[ip] = &bucket{count: 1, windowAt: time.Now()}
 			}
+			committed = true
 			mu.Unlock()
 			return
 		}
-		if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
+		// 登录成功（2xx）：清零计数。
+		if status >= 200 && status < 300 {
 			mu.Lock()
 			delete(byIP, ip)
+			committed = true
 			mu.Unlock()
+			return
 		}
+		// 其他状态：回滚预扣。
+		mu.Lock()
+		if b2, ok := byIP[ip]; ok {
+			b2.count--
+		}
+		committed = true
+		mu.Unlock()
 	}
 }
 

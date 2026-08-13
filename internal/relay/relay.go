@@ -343,46 +343,13 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 	firstToken := true
 	responseEvents := make([]*httpclient.StreamEvent, 0, 8)
 	eventsTruncated := false
-	type sseReadResult struct {
-		event *httpclient.StreamEvent
-		err   error
-	}
+
 	results := make(chan sseReadResult, 1)
 	done := make(chan struct{})
 	defer close(done)
 
-	go func() {
-		// 唯一 Close 点：正常结束、主循环退出（done）、ctx 取消、panic 都走这里。
-		defer close(results)
-		defer clientStream.Close()
-		defer func() {
-			if r := recover(); r != nil {
-				log.Warnf("stream reader panic: %v", r)
-				select {
-				case results <- sseReadResult{err: fmt.Errorf("stream reader panic: %v", r)}:
-				case <-done:
-				case <-ctx.Done():
-				}
-			}
-		}()
-		// Next 可能阻塞等待上游 token；协程化后主循环才能同时监听超时与断开。
-		for clientStream.Next() {
-			select {
-			case results <- sseReadResult{event: clientStream.Current()}:
-			case <-done:
-				return
-			case <-ctx.Done():
-				return
-			}
-		}
-		if err := clientStream.Err(); err != nil {
-			select {
-			case results <- sseReadResult{err: err}:
-			case <-done:
-			case <-ctx.Done():
-			}
-		}
-	}()
+	// reader goroutine 抽离到 startStreamReader，主函数聚焦 select 循环与状态判定。
+	go startStreamReader(ctx, clientStream, results, done)
 
 	firstTokenTimeoutSec := ra.group.FirstTokenTimeOut
 
@@ -399,45 +366,21 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 			return context.Canceled
 		case r, ok := <-results:
 			if !ok {
+				// reader 已关闭：流正常结束，聚合缓存事件用于日志与 usage。
 				log.Infof("stream end")
-				if len(responseEvents) == 0 {
-					return nil
+				if len(responseEvents) > 0 {
+					ra.aggregateStreamForLog(ctx, responseEvents, eventsTruncated)
 				}
-				// 流式路径不会自动生成完整响应体；聚合已缓存事件仅用于日志与 usage。
-				responseBody, meta, err := ra.inAdapter.AggregateStreamChunks(context.WithoutCancel(ctx), responseEvents)
-				if err != nil {
-					log.Warnf("failed to aggregate stream response for log: %v", err)
-					return nil
-				}
-				if eventsTruncated {
-					log.Warnf("stream event buffer truncated at %d events; log body may be incomplete", streamEventBufferMax)
-				}
-				ra.metrics.InternalResponse = responseBody
-				ra.metrics.RecordUsage(meta.Usage)
 				return nil
 			}
 			if r.err != nil {
-				// 首字超时通过取消请求上下文中断读取，这里把它转成明确的超时错误。
-				if firstTokenTimedOut.Load() {
-					return fmt.Errorf("first token timeout (%ds)", firstTokenTimeoutSec)
-				}
-				// 客户端断开：只停止，不触发故障转移（外层按 context.Canceled 记失败）。
-				if ctx.Err() != nil {
-					return context.Canceled
-				}
-				log.Warnf("failed to read event: %v", r.err)
-				return fmt.Errorf("failed to read stream event: %w", r.err)
+				return classifyReadError(ctx, r, firstTokenTimedOut, firstTokenTimeoutSec)
 			}
 
 			if r.event == nil || len(r.event.Data) == 0 {
 				continue
 			}
-			// 事件缓存仅服务最终日志；超限后仍转发，只是不再追加。
-			if len(responseEvents) < streamEventBufferMax {
-				responseEvents = append(responseEvents, r.event)
-			} else if !eventsTruncated {
-				eventsTruncated = true
-			}
+			responseEvents, eventsTruncated = appendEvent(responseEvents, eventsTruncated, r.event)
 			if firstToken {
 				ra.metrics.FirstTokenTime = time.Now()
 				firstToken = false

@@ -31,12 +31,10 @@ var statsHourlyCache [24]model.StatsHourly
 var statsHourlyCacheLock sync.RWMutex
 
 var statsChannelCache = cache.New[int, model.StatsChannel](16)
-var statsChannelDirty = newDirtySet()
-var statsChannelUpdateLock sync.RWMutex
+var statsChannelShards = newShardedStats[model.StatsChannel]()
 
 var statsAPIKeyCache = cache.New[int, model.StatsAPIKey](16)
-var statsAPIKeyDirty = newDirtySet()
-var statsAPIKeyUpdateLock sync.RWMutex
+var statsAPIKeyShards = newShardedStats[model.StatsAPIKey]()
 
 func StatsSaveDBTask() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -71,8 +69,11 @@ func StatsSaveDB(ctx context.Context) error {
 	hourlyAll := statsHourlyCache
 	statsHourlyCacheLock.RUnlock()
 
-	channelIDs := statsChannelDirty.Snapshot()
-	apiKeyIDs := statsAPIKeyDirty.Snapshot()
+	// 各分片独立摘出脏 id，保留分片顺序以便失败时精确回填。
+	channelTracked := statsChannelShards.snapshotAll()
+	apiKeyTracked := statsAPIKeyShards.snapshotAll()
+	channelIDs := flattenInts(channelTracked)
+	apiKeyIDs := flattenInts(apiKeyTracked)
 
 	statsDailyPendingLock.Lock()
 	pendingDaily := make([]model.StatsDaily, len(statsDailyPending))
@@ -85,8 +86,9 @@ func StatsSaveDB(ctx context.Context) error {
 	statsHourlyPendingLock.Unlock()
 
 	if err := persistStatsSnapshots(ctx, totalSnap, dailySnap, hourlyAll, channelIDs, apiKeyIDs, pendingDaily, pendingHourly); err != nil {
-		statsChannelDirty.Remerge(channelIDs)
-		statsAPIKeyDirty.Remerge(apiKeyIDs)
+		// 按分片精确回填，避免运行时累计的费用/状态码丢失。
+		statsChannelShards.remergeTracked(channelTracked)
+		statsAPIKeyShards.remergeTracked(apiKeyTracked)
 		return err
 	}
 
@@ -258,18 +260,10 @@ func StatsTotalUpdate(metrics model.StatsMetrics) error {
 }
 
 func StatsChannelUpdate(channelID int, metrics model.StatsMetrics) error {
-	statsChannelUpdateLock.Lock()
-	defer statsChannelUpdateLock.Unlock()
-
-	channelCache, ok := statsChannelCache.Get(channelID)
-	if !ok {
-		channelCache = model.StatsChannel{
-			ChannelID: channelID,
-		}
-	}
-	channelCache.StatsMetrics.Add(metrics)
-	statsChannelCache.Set(channelID, channelCache)
-	statsChannelDirty.Mark(channelID)
+	// 只锁目标分片，避免所有渠道的 stats 写入互相串行化。
+	statsChannelShards.update(channelID, statsChannelCache, model.StatsChannel{ChannelID: channelID}, func(v *model.StatsChannel) {
+		v.StatsMetrics.Add(metrics)
+	})
 	return nil
 }
 
@@ -310,39 +304,22 @@ func StatsHourlyUpdate(metrics model.StatsMetrics) error {
 }
 
 func StatsAPIKeyUpdate(apiKeyID int, metrics model.StatsMetrics) error {
-	statsAPIKeyUpdateLock.Lock()
-	defer statsAPIKeyUpdateLock.Unlock()
-
-	apiKeyCache, ok := statsAPIKeyCache.Get(apiKeyID)
-	if !ok {
-		apiKeyCache = model.StatsAPIKey{
-			APIKeyID: apiKeyID,
-		}
-	}
-	apiKeyCache.StatsMetrics.Add(metrics)
-	statsAPIKeyCache.Set(apiKeyID, apiKeyCache)
-	statsAPIKeyDirty.Mark(apiKeyID)
+	// 只锁目标分片，避免所有 API Key 的 stats 写入互相串行化。
+	statsAPIKeyShards.update(apiKeyID, statsAPIKeyCache, model.StatsAPIKey{APIKeyID: apiKeyID}, func(v *model.StatsAPIKey) {
+		v.StatsMetrics.Add(metrics)
+	})
 	return nil
 }
 
 // StatsChannelCacheRemove 仅清理缓存与脏标记；DB 删除已由调用方在事务内完成。
 func StatsChannelCacheRemove(id int) {
-	statsChannelUpdateLock.Lock()
-	defer statsChannelUpdateLock.Unlock()
-	statsChannelCache.Del(id)
-	statsChannelDirty.Remove(id)
+	statsChannelShards.remove(id, statsChannelCache)
 }
 
 func StatsAPIKeyDel(id int) error {
-	statsAPIKeyUpdateLock.Lock()
-	defer statsAPIKeyUpdateLock.Unlock()
-
-	if _, ok := statsAPIKeyCache.Get(id); !ok {
-		return nil
-	}
-	statsAPIKeyCache.Del(id)
-	statsAPIKeyDirty.Remove(id)
-	return db.GetDB().Delete(&model.StatsAPIKey{}, id).Error
+	return statsAPIKeyShards.removeAndDeleteDB(id, statsAPIKeyCache, func(id int) error {
+		return db.GetDB().Delete(&model.StatsAPIKey{}, id).Error
+	})
 }
 
 func StatsTotalGet() model.StatsTotal {
@@ -358,46 +335,15 @@ func StatsTodayGet() model.StatsDaily {
 }
 
 func StatsChannelGet(id int) model.StatsChannel {
-	// 快速路径：只读命中无需独占锁（每请求热路径，auth 中间件与 channel 列表调用）
-	statsChannelUpdateLock.RLock()
-	stats, ok := statsChannelCache.Get(id)
-	statsChannelUpdateLock.RUnlock()
-	if ok {
-		return stats
-	}
-
-	statsChannelUpdateLock.Lock()
-	defer statsChannelUpdateLock.Unlock()
-	if stats, ok := statsChannelCache.Get(id); ok {
-		return stats
-	}
-	tmp := model.StatsChannel{
-		ChannelID: id,
-	}
-	statsChannelCache.Set(id, tmp)
-	statsChannelDirty.Mark(id)
-	return tmp
+	// 只锁目标分片；读未命中时写入零值占位但不标记 dirty，避免零值行无谓落库。
+	stats, _ := statsChannelShards.getOrCreate(id, statsChannelCache, model.StatsChannel{ChannelID: id})
+	return stats
 }
 
 func StatsAPIKeyGet(id int) model.StatsAPIKey {
-	statsAPIKeyUpdateLock.RLock()
-	stats, ok := statsAPIKeyCache.Get(id)
-	statsAPIKeyUpdateLock.RUnlock()
-	if ok {
-		return stats
-	}
-
-	statsAPIKeyUpdateLock.Lock()
-	defer statsAPIKeyUpdateLock.Unlock()
-	if stats, ok := statsAPIKeyCache.Get(id); ok {
-		return stats
-	}
-	tmp := model.StatsAPIKey{
-		APIKeyID: id,
-	}
-	statsAPIKeyCache.Set(id, tmp)
-	statsAPIKeyDirty.Mark(id)
-	return tmp
+	// 只锁目标分片；读未命中时写入零值占位但不标记 dirty，避免零值行无谓落库。
+	stats, _ := statsAPIKeyShards.getOrCreate(id, statsAPIKeyCache, model.StatsAPIKey{APIKeyID: id})
+	return stats
 }
 
 func StatsAPIKeyList() []model.StatsAPIKey {
@@ -498,10 +444,9 @@ func statsRefreshCache(ctx context.Context) error {
 	statsTotalCache = loadedTotal
 	statsTotalCacheLock.Unlock()
 
-	statsChannelCache.Clear()
-	statsChannelDirty.Clear()
+	statsChannelShards.clearAll(statsChannelCache)
 	for _, v := range loadedChannels {
-		statsChannelCache.Set(v.ChannelID, v)
+		statsChannelShards.loadInto(v.ChannelID, statsChannelCache, v)
 	}
 
 	var loadedAPIKeys []model.StatsAPIKey
@@ -510,10 +455,9 @@ func statsRefreshCache(ctx context.Context) error {
 		return fmt.Errorf("failed to get api key stats: %v", result.Error)
 	}
 
-	statsAPIKeyCache.Clear()
-	statsAPIKeyDirty.Clear()
+	statsAPIKeyShards.clearAll(statsAPIKeyCache)
 	for _, v := range loadedAPIKeys {
-		statsAPIKeyCache.Set(v.APIKeyID, v)
+		statsAPIKeyShards.loadInto(v.APIKeyID, statsAPIKeyCache, v)
 	}
 
 	statsHourlyCacheLock.Lock()

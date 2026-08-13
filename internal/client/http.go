@@ -18,6 +18,10 @@ var (
 	systemProxyClient  *http.Client
 	systemProxyURL     string
 	clientLock         sync.RWMutex
+
+	// customProxyClients 按 proxy URL 缓存 *http.Client，复用底层 Transport 的连接池，
+	// 避免每个转发请求都重建 client 导致无 TCP 连接复用、无 TLS 会话复用。
+	customProxyClients sync.Map // map[string]*http.Client
 )
 
 // GetHTTPClientSystemProxy returns a cached http.Client.
@@ -78,13 +82,26 @@ func GetHTTPClientSystemProxy(useProxy bool) (*http.Client, error) {
 	return systemDirectClient, nil
 }
 
-// GetHTTPClientCustomProxy returns a NEW http.Client every time (no reuse).
-// proxyURL supports: http, https, socks, socks5
+// GetHTTPClientCustomProxy 返回按 proxyURL 复用的 http.Client（含连接池）。
+// proxyURL 支持: http, https, socks, socks5
 func GetHTTPClientCustomProxy(proxyURL string) (*http.Client, error) {
 	if proxyURL == "" {
 		return nil, fmt.Errorf("proxy url is empty")
 	}
-	return newHTTPClientCustomProxy(proxyURL)
+
+	// 快速路径：读缓存命中直接返回，避免锁竞争。
+	if v, ok := customProxyClients.Load(proxyURL); ok {
+		return v.(*http.Client), nil
+	}
+
+	// 慢路径：未命中则创建。并发时可能重复创建同一 URL 的 client，
+	// 但 sync.Map 的 LoadOrStore 保证最终只保留一个，其余被丢弃。
+	client, err := newHTTPClientCustomProxy(proxyURL)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := customProxyClients.LoadOrStore(proxyURL, client)
+	return actual.(*http.Client), nil
 }
 
 func clonedDefaultTransport() (*http.Transport, error) {
