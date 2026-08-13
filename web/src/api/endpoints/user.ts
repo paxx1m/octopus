@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { apiClient, setAuthStoreGetter } from '../client';
 import { logger } from '@/lib/logger';
-import { makeMutation } from '../mutation-helpers';
+import { useAppMutation } from '../mutation-helpers';
 
 /**
  * 用户登录请求
@@ -184,7 +184,7 @@ if (typeof window !== 'undefined') {
 export function useLogin() {
     const { setAuth } = useAuthStore();
 
-    return makeMutation<UserLoginRequest, UserLoginResponse>({
+    return useAppMutation<UserLoginRequest, UserLoginResponse>({
         name: '登录',
         mutationFn: (data) => apiClient.post<UserLoginResponse>('/api/v1/user/login', data),
         onSuccess: (data) => {
@@ -202,7 +202,7 @@ export function useLogin() {
  */
 export function useChangePassword() {
     const { setMustChangePassword } = useAuthStore();
-    return makeMutation<{ oldPassword: string; newPassword: string }, string>({
+    return useAppMutation<{ oldPassword: string; newPassword: string }, string>({
         name: '密码修改',
         mutationFn: async (data) => {
             const payload: ChangePasswordRequest = {
@@ -225,7 +225,7 @@ export function useChangePassword() {
  * changeUsername.mutate({ newUsername: 'newname' });
  */
 export function useChangeUsername() {
-    return makeMutation<{ newUsername: string }, string>({
+    return useAppMutation<{ newUsername: string }, string>({
         name: '用户名修改',
         mutationFn: async (data) => {
             const payload: ChangeUsernameRequest = {

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../client';
-import { makeMutation } from '../mutation-helpers';
+import { useAppMutation } from '../mutation-helpers';
 
 /**
  * LLM 价格信息
@@ -87,7 +87,7 @@ export function useModelChannelList() {
  * });
  */
 export function useUpdateModel() {
-    return makeMutation<LLMInfo, LLMInfo>({
+    return useAppMutation<LLMInfo, LLMInfo>({
         name: '模型更新',
         mutationFn: (data) => apiClient.post<LLMInfo>('/api/v1/model/update', data),
         invalidate: [['models', 'list']],
@@ -109,7 +109,7 @@ export function useUpdateModel() {
  * });
  */
 export function useCreateModel() {
-    return makeMutation<LLMInfo, LLMInfo>({
+    return useAppMutation<LLMInfo, LLMInfo>({
         name: '模型创建',
         mutationFn: (data) => apiClient.post<LLMInfo>('/api/v1/model/create', data),
         invalidate: [['models', 'list']],
@@ -125,7 +125,7 @@ export function useCreateModel() {
  * deleteModel.mutate('gpt-4'); // 删除名称为 'gpt-4' 的模型
  */
 export function useDeleteModel() {
-    return makeMutation<string, null>({
+    return useAppMutation<string, null>({
         name: '模型删除',
         mutationFn: (name) => apiClient.post<null>('/api/v1/model/delete', { name }),
         invalidate: [['models', 'list']],

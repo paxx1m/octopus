@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiClient, type BlobDownload } from '../client';
 import { logger } from '@/lib/logger';
-import { makeMutation } from '../mutation-helpers';
+import { useAppMutation } from '../mutation-helpers';
 
 /**
  * Setting 数据
@@ -59,7 +59,7 @@ export function useSettingList() {
  * });
  */
 export function useSetSetting() {
-    return makeMutation<Setting, Setting>({
+    return useAppMutation<Setting, Setting>({
         name: 'Setting 设置',
         mutationFn: (data) => apiClient.post<Setting>('/api/v1/setting/set', data),
         invalidate: [['settings', 'list']],

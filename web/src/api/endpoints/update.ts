@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../client';
-import { makeMutation } from '../mutation-helpers';
+import { useAppMutation } from '../mutation-helpers';
 
 /**
  * 后端 /api/v1/update 返回的最新发布信息
@@ -63,7 +63,7 @@ export function useNowVersion() {
  * });
  */
 export function useUpdateCore() {
-    return makeMutation<void, string>({
+    return useAppMutation<void, string>({
         name: '更新',
         mutationFn: () => apiClient.post<string>('/api/v1/update'),
         invalidate: [['update', 'latest'], ['update', 'now-version']],

@@ -1,10 +1,10 @@
-import { useMutation, useQueryClient, type UseMutationOptions, type UseMutationResult } from '@tanstack/react-query';
+import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
 import { logger } from '@/lib/logger';
 import { toast } from '@/components/common/Toast';
 
 type QueryKey = readonly unknown[];
 
-export interface MakeMutationOptions<TVars, TData, TError extends Error = Error> {
+export interface UseAppMutationOptions<TVars, TData, TError extends Error = Error> {
     mutationFn: (vars: TVars) => Promise<TData>;
     /** 操作名称，用于日志（如 "渠道创建"）；自动拼成 "渠道创建成功" / "渠道创建失败" */
     name: string;
@@ -17,26 +17,26 @@ export interface MakeMutationOptions<TVars, TData, TError extends Error = Error>
 }
 
 /**
- * 创建带统一日志 + invalidate 模板的 mutation hook。
+ * 统一日志 + invalidate 的 mutation hook。
  *
- * 消除每个 endpoint 中重复的：
- * - onSuccess: logger.log('XX成功') + invalidateQueries
- * - onError: logger.error('XX失败')
+ * 必须是 use* 命名：项目启用了 React Compiler，非 use* 函数内调用 hook
+ * 会被错误编译，导致 useCallback deps 为 undefined 并在登录页崩溃。
  *
  * @example
  * export function useCreateChannel() {
- *     return makeMutation({
+ *     return useAppMutation({
  *         name: '渠道创建',
  *         mutationFn: (data: CreateChannelRequest) => apiClient.post('/api/v1/channel/create', data),
  *         invalidate: [['channels', 'list'], ['models', 'list']],
  *     });
  * }
  */
-// eslint-disable-next-line react-hooks/rules-of-hooks -- makeMutation 是工厂 hook，语义等同 useMutation 的薄包装
-export function makeMutation<TVars, TData = unknown, TError extends Error = Error>(opts: MakeMutationOptions<TVars, TData, TError>) {
+export function useAppMutation<TVars, TData = unknown, TError extends Error = Error>(
+    opts: UseAppMutationOptions<TVars, TData, TError>,
+): UseMutationResult<TData, TError, TVars> {
     const queryClient = useQueryClient();
 
-    const mutationOptions: UseMutationOptions<TData, TError, TVars> = {
+    return useMutation<TData, TError, TVars>({
         mutationFn: opts.mutationFn,
         onSuccess: (data, vars) => {
             logger.log(`${opts.name}成功:`, data);
@@ -49,9 +49,7 @@ export function makeMutation<TVars, TData = unknown, TError extends Error = Erro
             logger.error(`${opts.name}失败:`, error);
             opts.onError?.(error, vars);
         },
-    };
-
-    return useMutation(mutationOptions);
+    });
 }
 
 export interface UseToastMutationOptions<TVars, TData, TError extends Error = Error> {
@@ -71,21 +69,14 @@ export interface UseToastMutationOptions<TVars, TData, TError extends Error = Er
 }
 
 /**
- * 创建带 toast 反馈的 mutation hook。
+ * 带 toast 反馈的 mutation hook。
  *
- * 在 makeMutation 基础上叠加 toast.success / toast.error，
- * 用于需要即时用户反馈的写操作（如设置保存、密码修改）。
- *
- * @example
- * const updatePrice = useToastMutation({
- *     name: '模型价格更新',
- *     mutationFn: () => apiClient.post('/api/v1/model/update-price', {}),
- *     successMsg: t('llmPrice.updateSuccess'),
- *     errorMsg: t('llmPrice.updateFailed'),
- *     invalidate: [['models', 'last-update-time']],
- * });
+ * 在 useAppMutation 基础上叠加 toast.success / toast.error，
+ * 用于需要即时用户反馈的写操作（如设置保存、手动同步）。
  */
-export function useToastMutation<TVars, TData = unknown, TError extends Error = Error>(opts: UseToastMutationOptions<TVars, TData, TError>): UseMutationResult<TData, TError, TVars> {
+export function useToastMutation<TVars, TData = unknown, TError extends Error = Error>(
+    opts: UseToastMutationOptions<TVars, TData, TError>,
+): UseMutationResult<TData, TError, TVars> {
     const queryClient = useQueryClient();
 
     return useMutation<TData, TError, TVars>({

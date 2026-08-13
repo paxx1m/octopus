@@ -3,7 +3,7 @@ import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../client';
 import { useSSEStream } from './sse';
 import { logger } from '@/lib/logger';
-import { makeMutation } from '../mutation-helpers';
+import { useAppMutation } from '../mutation-helpers';
 import { useCallback, useMemo } from 'react';
 
 /**
@@ -58,7 +58,7 @@ export interface RelayLog {
  * clearLogs.mutate();
  */
 export function useClearLogs() {
-    return makeMutation<void, null>({
+    return useAppMutation<void, null>({
         name: '日志清空',
         mutationFn: () => apiClient.delete<null>('/api/v1/log/clear'),
         invalidate: [['logs']],

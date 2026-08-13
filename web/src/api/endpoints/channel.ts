@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../client';
-import { makeMutation } from '../mutation-helpers';
+import { useAppMutation } from '../mutation-helpers';
 import { StatsChannel, type StatsMetricsFormatted, formatStatsMetrics } from './stats';
 /**
  * 渠道类型枚举
@@ -216,7 +216,7 @@ export function useChannelList() {
  * });
  */
 export function useCreateChannel() {
-    return makeMutation<CreateChannelRequest, ChannelServer>({
+    return useAppMutation<CreateChannelRequest, ChannelServer>({
         name: '渠道创建',
         mutationFn: (data) => apiClient.post<ChannelServer>('/api/v1/channel/create', data),
         invalidate: [['channels', 'list'], ['models', 'list'], ['models', 'channel']],
@@ -241,7 +241,7 @@ export function useCreateChannel() {
  * });
  */
 export function useUpdateChannel() {
-    return makeMutation<UpdateChannelRequest, ChannelServer>({
+    return useAppMutation<UpdateChannelRequest, ChannelServer>({
         name: '渠道更新',
         mutationFn: (data) => apiClient.post<ChannelServer>('/api/v1/channel/update', data),
         invalidate: [['channels', 'list'], ['models', 'channel']],
@@ -257,7 +257,7 @@ export function useUpdateChannel() {
  * deleteChannel.mutate(1); // 删除 ID 为 1 的渠道
  */
 export function useDeleteChannel() {
-    return makeMutation<number, null>({
+    return useAppMutation<number, null>({
         name: '渠道删除',
         mutationFn: (id) => apiClient.delete<null>(`/api/v1/channel/delete/${id}`),
         invalidate: [['channels', 'list'], ['models', 'channel']],
@@ -274,7 +274,7 @@ export function useDeleteChannel() {
  * enableChannel.mutate({ id: 1, enabled: false }); // 禁用 ID 为 1 的渠道
  */
 export function useEnableChannel() {
-    return makeMutation<{ id: number; enabled: boolean }, null>({
+    return useAppMutation<{ id: number; enabled: boolean }, null>({
         name: '渠道状态更新',
         mutationFn: (data) => apiClient.post<null>('/api/v1/channel/enable', data),
         invalidate: [['channels', 'list']],
@@ -298,7 +298,7 @@ export function useEnableChannel() {
  * fetchModel.data // ['gpt-4', 'gpt-3.5-turbo', ...]
  */
 export function useFetchModel() {
-    return makeMutation<FetchModelRequest, string[]>({
+    return useAppMutation<FetchModelRequest, string[]>({
         name: '模型列表获取',
         mutationFn: (data) => apiClient.post<string[]>('/api/v1/channel/fetch-model', data),
     });

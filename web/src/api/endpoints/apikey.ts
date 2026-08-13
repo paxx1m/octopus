@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../client';
-import { makeMutation } from '../mutation-helpers';
+import { useAppMutation } from '../mutation-helpers';
 import { useAuthStore } from './user';
 import { StatsAPIKey, StatsAPIKeyFormatted, formatStatsMetrics } from './stats';
 
@@ -36,7 +36,7 @@ export interface APIKeyStatsResponseFormatted {
 export function useAPIKeyLogin() {
     const { setAPIKeyAuth, logout } = useAuthStore();
 
-    return makeMutation<string, string>({
+    return useAppMutation<string, string>({
         name: 'API Key 登录',
         mutationFn: async (apiKey) => {
             // 先设置以便 apiClient 发送请求时带上 token
@@ -118,7 +118,7 @@ export function useAPIKeyList() {
  * });
  */
 export function useCreateAPIKey() {
-    return makeMutation<CreateAPIKeyRequest, APIKey>({
+    return useAppMutation<CreateAPIKeyRequest, APIKey>({
         name: 'API Key 创建',
         mutationFn: (data) => apiClient.post<APIKey>('/api/v1/apikey/create', data),
         invalidate: [['apikeys', 'list']],
@@ -138,7 +138,7 @@ export function useCreateAPIKey() {
  * });
  */
 export function useUpdateAPIKey() {
-    return makeMutation<UpdateAPIKeyRequest, APIKey>({
+    return useAppMutation<UpdateAPIKeyRequest, APIKey>({
         name: 'API Key 更新',
         mutationFn: (data) => apiClient.post<APIKey>('/api/v1/apikey/update', data),
         invalidate: [['apikeys', 'list']],
@@ -154,7 +154,7 @@ export function useUpdateAPIKey() {
  * deleteAPIKey.mutate(1); // 删除 ID 为 1 的 API Key
  */
 export function useDeleteAPIKey() {
-    return makeMutation<number, null>({
+    return useAppMutation<number, null>({
         name: 'API Key 删除',
         mutationFn: (id) => apiClient.delete<null>(`/api/v1/apikey/delete/${id}`),
         invalidate: [['apikeys', 'list']],

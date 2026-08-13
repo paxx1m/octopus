@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../client';
-import { makeMutation } from '../mutation-helpers';
+import { useAppMutation } from '../mutation-helpers';
 
 /**
  * 分组项信息
@@ -107,7 +107,7 @@ export function useGroupList() {
  * });
  */
 export function useCreateGroup() {
-    return makeMutation<Group, Group>({
+    return useAppMutation<Group, Group>({
         name: '分组创建',
         mutationFn: (data) => apiClient.post<Group>('/api/v1/group/create', data),
         invalidate: [['groups', 'list']],
@@ -129,7 +129,7 @@ export function useCreateGroup() {
  * });
  */
 export function useUpdateGroup() {
-    return makeMutation<GroupUpdateRequest, Group>({
+    return useAppMutation<GroupUpdateRequest, Group>({
         name: '分组更新',
         mutationFn: (data) => apiClient.post<Group>('/api/v1/group/update', data),
         invalidate: [['groups', 'list']],
@@ -145,7 +145,7 @@ export function useUpdateGroup() {
  * deleteGroup.mutate(1); // 删除 ID 为 1 的分组
  */
 export function useDeleteGroup() {
-    return makeMutation<number, null>({
+    return useAppMutation<number, null>({
         name: '分组删除',
         mutationFn: (id) => apiClient.delete<null>(`/api/v1/group/delete/${id}`),
         invalidate: [['groups', 'list']],
