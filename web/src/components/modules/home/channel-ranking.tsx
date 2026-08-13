@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useChannelList } from '@/api/endpoints/channel';
 import { cn } from '@/lib/utils';
+import { latencyColorClass, speedColorClass } from '@/lib/metrics';
 import {
     useHomeViewStore,
     type ChannelRankingSortMode,
@@ -205,10 +206,20 @@ export function ChannelRanking() {
                                         >
                                             {row.request_count === 0 ? '—' : row.success_rate_label}
                                         </td>
-                                        <td className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
+                                        <td className={cn(
+                                            'px-2 py-2.5 text-right tabular-nums',
+                                            disabled || row.request_count === 0
+                                                ? 'text-muted-foreground'
+                                                : latencyColorClass(row.avg_latency_ms),
+                                        )}>
                                             {row.request_count === 0 ? '—' : row.avg_latency_label}
                                         </td>
-                                        <td className="px-2 py-2.5 text-right tabular-nums">
+                                        <td className={cn(
+                                            'px-2 py-2.5 text-right tabular-nums',
+                                            disabled || row.request_count === 0 || row.tokens_per_sec <= 0
+                                                ? 'text-muted-foreground'
+                                                : speedColorClass(row.tokens_per_sec),
+                                        )}>
                                             {row.request_count === 0 || row.tokens_per_sec <= 0
                                                 ? '—'
                                                 : row.tokens_per_sec_label}

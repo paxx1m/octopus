@@ -76,6 +76,32 @@ export function formatAvgLatency(ms: number): string {
 }
 
 /**
+ * 根据延迟（ms）返回颜色 class。
+ * 越快越绿，越慢越红；用 dark: 变体保证深色背景下可读。
+ */
+export function latencyColorClass(ms: number): string {
+    if (!Number.isFinite(ms) || ms <= 0) return 'text-muted-foreground';
+    if (ms < 500) return 'text-emerald-600 dark:text-emerald-400';
+    if (ms < 1500) return 'text-lime-600 dark:text-lime-400';
+    if (ms < 3000) return 'text-amber-600 dark:text-amber-400';
+    if (ms < 6000) return 'text-orange-600 dark:text-orange-400';
+    return 'text-red-600 dark:text-red-400';
+}
+
+/**
+ * 根据速度（t/s）返回颜色 class。
+ * 越快越绿，越慢越红。
+ */
+export function speedColorClass(tps: number): string {
+    if (!Number.isFinite(tps) || tps <= 0) return 'text-muted-foreground';
+    if (tps >= 80) return 'text-emerald-600 dark:text-emerald-400';
+    if (tps >= 40) return 'text-lime-600 dark:text-lime-400';
+    if (tps >= 20) return 'text-amber-600 dark:text-amber-400';
+    if (tps >= 10) return 'text-orange-600 dark:text-orange-400';
+    return 'text-red-600 dark:text-red-400';
+}
+
+/**
  * 格式化后端返回的时间戳（ISO 字符串）；空值或无效年份（0001-01-01）返回 neverLabel。
  * LLMPrice / LLMSync 等页面共用。
  */
