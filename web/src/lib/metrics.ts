@@ -76,10 +76,10 @@ export function formatAvgLatency(ms: number): string {
 }
 
 /**
- * 根据延迟（ms）返回颜色 class。
- * 越快越绿，越慢越红；用 dark: 变体保证深色背景下可读。
+ * 根据首字时间（TTFT，ms）返回颜色 class。
+ * 首字时间通常为毫秒~秒级，区间贴近该量级。
  */
-export function latencyColorClass(ms: number): string {
+export function firstTokenColorClass(ms: number): string {
     if (!Number.isFinite(ms) || ms <= 0) return 'text-muted-foreground';
     if (ms < 500) return 'text-emerald-600 dark:text-emerald-400';
     if (ms < 1500) return 'text-lime-600 dark:text-lime-400';
@@ -89,16 +89,34 @@ export function latencyColorClass(ms: number): string {
 }
 
 /**
+ * 根据总耗时（ms）返回颜色 class。
+ * 总耗时包含生成阶段，流式长回复可达数十秒~分钟级，因此区间上移。
+ */
+export function totalTimeColorClass(ms: number): string {
+    if (!Number.isFinite(ms) || ms <= 0) return 'text-muted-foreground';
+    if (ms < 5000) return 'text-emerald-600 dark:text-emerald-400';
+    if (ms < 15000) return 'text-lime-600 dark:text-lime-400';
+    if (ms < 30000) return 'text-amber-600 dark:text-amber-400';
+    if (ms < 60000) return 'text-orange-600 dark:text-orange-400';
+    return 'text-red-600 dark:text-red-400';
+}
+
+/**
  * 根据速度（t/s）返回颜色 class。
- * 越快越绿，越慢越红。
+ * 越快越绿，越慢越红；推理模型输出速度通常 10~30 t/s。
  */
 export function speedColorClass(tps: number): string {
     if (!Number.isFinite(tps) || tps <= 0) return 'text-muted-foreground';
-    if (tps >= 80) return 'text-emerald-600 dark:text-emerald-400';
-    if (tps >= 40) return 'text-lime-600 dark:text-lime-400';
-    if (tps >= 20) return 'text-amber-600 dark:text-amber-400';
-    if (tps >= 10) return 'text-orange-600 dark:text-orange-400';
+    if (tps >= 50) return 'text-emerald-600 dark:text-emerald-400';
+    if (tps >= 25) return 'text-lime-600 dark:text-lime-400';
+    if (tps >= 12) return 'text-amber-600 dark:text-amber-400';
+    if (tps >= 6) return 'text-orange-600 dark:text-orange-400';
     return 'text-red-600 dark:text-red-400';
+}
+
+/** @deprecated 使用 totalTimeColorClass，保留兼容旧引用。 */
+export function latencyColorClass(ms: number): string {
+    return totalTimeColorClass(ms);
 }
 
 /**

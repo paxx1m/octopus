@@ -10,7 +10,7 @@ import { type RelayLog, type ChannelAttempt } from '@/api/endpoints/log';
 import { getModelIcon } from '@/lib/model-icons';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { formatTokensPerSec, outputTokensPerSecond, formatAvgLatency, latencyColorClass, speedColorClass } from '@/lib/metrics';
+import { formatTokensPerSec, outputTokensPerSecond, formatAvgLatency, firstTokenColorClass, totalTimeColorClass, speedColorClass } from '@/lib/metrics';
 import { useSettingStore } from '@/stores/setting';
 import { CopyIconButton } from '@/components/common/CopyButton';
 import { dialogPanelClass } from '@/components/common/DialogShell';
@@ -78,7 +78,7 @@ function RetryBadgeWithTooltip({ channelName, brandColor, attempts }: RetryBadge
                                 <span className="truncate text-xs font-semibold text-foreground">
                                     {attempt.channel_name}
                                 </span>
-                                <span className={cn('text-[10px] text-muted-foreground', latencyColorClass(attempt.duration))}>
+                                <span className={cn('text-[10px] text-muted-foreground', totalTimeColorClass(attempt.duration))}>
                                     {attempt.model_name} • {formatAvgLatency(attempt.duration)}
                                 </span>
                             </div>
@@ -254,11 +254,11 @@ export function LogCard({ log }: { log: RelayLog }) {
                                 )}
                                 <div className="flex items-center gap-1.5">
                                     <Zap className="size-3.5 shrink-0 text-amber-500" />
-                                    <span className={latencyColorClass(log.ftut ?? 0)}>{t('firstToken')} {formatAvgLatency(log.ftut)}</span>
+                                    <span className={firstTokenColorClass(log.ftut ?? 0)}>{t('firstToken')} {formatAvgLatency(log.ftut)}</span>
                                 </div>
                                 <div className="flex items-center gap-1.5">
                                     <Cpu className="size-3.5 shrink-0 text-blue-500" />
-                                    <span className={latencyColorClass(log.use_time ?? 0)}>{t('totalTime')} {formatAvgLatency(log.use_time)}</span>
+                                    <span className={totalTimeColorClass(log.use_time ?? 0)}>{t('totalTime')} {formatAvgLatency(log.use_time)}</span>
                                 </div>
                                 <div className="flex items-center gap-1.5">
                                     <Gauge className="size-3.5 shrink-0 text-cyan-500" />
@@ -475,11 +475,11 @@ export function LogCard({ log }: { log: RelayLog }) {
                             )}
                             <div className="flex items-center gap-1.5">
                                 <Zap className="size-3.5 text-amber-500" />
-                                <span className={latencyColorClass(log.ftut ?? 0)}>{t('firstTokenTime')}: {formatAvgLatency(log.ftut)}</span>
+                                <span className={firstTokenColorClass(log.ftut ?? 0)}>{t('firstTokenTime')}: {formatAvgLatency(log.ftut)}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                                 <Cpu className="size-3.5 text-blue-500" />
-                                <span className={latencyColorClass(log.use_time ?? 0)}>{t('totalTime')}: {formatAvgLatency(log.use_time)}</span>
+                                <span className={totalTimeColorClass(log.use_time ?? 0)}>{t('totalTime')}: {formatAvgLatency(log.use_time)}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                                 <Gauge className="size-3.5 text-cyan-500" />

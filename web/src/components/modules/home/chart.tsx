@@ -3,14 +3,14 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/
 import { useMemo } from 'react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { useTranslations } from 'use-intl';
-import { formatCount, formatMoney } from '@/lib/utils';
+import { cn, formatCount, formatMoney } from '@/lib/utils';
 import dayjs from 'dayjs';
 import { AnimatedNumber } from '@/components/common/AnimatedNumber';
 import { Tabs, TabsList, TabsTrigger } from '@/components/animate-ui/components/animate/tabs';
 import { useHomeViewStore, type ChartMetricType, type ChartPeriod } from '@/components/modules/home/store';
 
 export function StatsChart() {
-    const PERIODS: readonly ChartPeriod[] = ['1', '7', '30'];
+    const PERIODS: readonly ChartPeriod[] = ['today', '7', '30', '90', 'all'];
     const { data: statsDaily } = useStatsDaily();
     const { data: statsHourly } = useStatsHourly();
     const t = useTranslations('home.chart');
@@ -31,7 +31,7 @@ export function StatsChart() {
 
     const chartData = useMemo(() => {
         const dataKey = getChartDataKey(chartMetricType);
-        if (period === '1') {
+        if (period === 'today') {
             if (!statsHourly) return [];
             return statsHourly.map((stat) => ({
                 date: `${stat.hour}:00`,
@@ -42,7 +42,7 @@ export function StatsChart() {
                         : (stat.input_token.raw + stat.output_token.raw),
             }));
         } else {
-            const days = Number(period);
+            const days = period === 'all' ? sortedDaily.length : Number(period);
             return sortedDaily.slice(-days).map((stat) => ({
                 date: dayjs(stat.date).format('MM/DD'),
                 [dataKey]: chartMetricType === 'cost'
@@ -55,7 +55,7 @@ export function StatsChart() {
     }, [sortedDaily, statsHourly, period, chartMetricType]);
 
     const totals = useMemo(() => {
-        if (period === '1') {
+        if (period === 'today') {
             if (!statsHourly) return { requests: 0, cost: 0, tokens: 0 };
             const requests = statsHourly.reduce((acc, stat) => acc + stat.request_count.raw, 0);
             const cost = statsHourly.reduce((acc, stat) => acc + stat.total_cost.raw, 0);
@@ -66,7 +66,7 @@ export function StatsChart() {
                 tokens,
             };
         } else {
-            const days = Number(period);
+            const days = period === 'all' ? sortedDaily.length : Number(period);
             const recentStats = sortedDaily.slice(-days);
             const requests = recentStats.reduce((acc, stat) => acc + stat.request_success.raw + stat.request_failed.raw, 0);
             const cost = recentStats.reduce((acc, stat) => acc + stat.total_cost.raw, 0);
@@ -93,18 +93,13 @@ export function StatsChart() {
 
     const getPeriodLabel = (p: ChartPeriod) => {
         const labels = {
-            '1': t('period.today'),
+            'today': t('period.today'),
             '7': t('period.last7Days'),
             '30': t('period.last30Days'),
+            '90': t('period.last90Days'),
+            'all': t('period.allTime'),
         };
         return labels[p];
-    };
-
-
-    const handlePeriodClick = () => {
-        const currentIndex = PERIODS.indexOf(period);
-        const nextIndex = (currentIndex + 1) % PERIODS.length;
-        setChartPeriod(PERIODS[nextIndex]);
     };
 
 
@@ -161,13 +156,24 @@ export function StatsChart() {
                             </div>
                         </div>
                     </div>
-                    <div
-                        className="flex gap-2 text-sm cursor-pointer hover:opacity-80 transition-opacity"
-                        onClick={handlePeriodClick}
-                    >
-                        <div>
-                            <div className="text-xs text-muted-foreground">{t('timePeriod')}</div>
-                            <div className="text-base font-semibold">{getPeriodLabel(period)}</div>
+                    <div className="flex flex-col items-end gap-1.5">
+                        <div className="text-xs text-muted-foreground">{t('timePeriod')}</div>
+                        <div className="flex gap-1">
+                            {PERIODS.map((p) => (
+                                <button
+                                    key={p}
+                                    type="button"
+                                    onClick={() => setChartPeriod(p)}
+                                    className={cn(
+                                        'inline-flex h-7 items-center rounded-lg px-2.5 text-xs font-medium transition-colors',
+                                        period === p
+                                            ? 'bg-primary text-primary-foreground'
+                                            : 'bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground',
+                                    )}
+                                >
+                                    {getPeriodLabel(p)}
+                                </button>
+                            ))}
                         </div>
                     </div>
                 </div>

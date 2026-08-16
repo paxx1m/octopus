@@ -11,7 +11,7 @@ export type ChannelRankingSortMode =
     | 'tokens';
 
 export type ChartMetricType = 'cost' | 'count' | 'tokens';
-export type ChartPeriod = '1' | '7' | '30';
+export type ChartPeriod = 'today' | '7' | '30' | '90' | 'all';
 
 const VALID_RANKING_SORT = new Set<string>([
     'count',
@@ -22,11 +22,23 @@ const VALID_RANKING_SORT = new Set<string>([
     'tokens',
 ]);
 
+const VALID_CHART_PERIOD = new Set<string>(['today', '7', '30', '90', 'all']);
+
 /** Returns null when value is missing/invalid so callers can fall back. */
 export function normalizeChannelRankingSort(value: unknown): ChannelRankingSortMode | null {
     if (typeof value === 'string' && VALID_RANKING_SORT.has(value)) {
         return value as ChannelRankingSortMode;
     }
+    return null;
+}
+
+/** Returns null when value is missing/invalid so callers can fall back. */
+export function normalizeChartPeriod(value: unknown): ChartPeriod | null {
+    if (typeof value === 'string' && VALID_CHART_PERIOD.has(value)) {
+        return value as ChartPeriod;
+    }
+    // 兼容旧持久化数据：旧值 '1' 表示今天
+    if (value === '1') return 'today';
     return null;
 }
 
@@ -44,7 +56,7 @@ export const useHomeViewStore = create<HomeViewState>()(
         (set) => ({
             channelRankingSort: 'count',
             chartMetricType: 'cost',
-            chartPeriod: '1',
+            chartPeriod: 'today',
             setChannelRankingSort: (value) => set({ channelRankingSort: value }),
             setChartMetricType: (value) => set({ chartMetricType: value }),
             setChartPeriod: (value) => set({ chartPeriod: value }),
@@ -69,6 +81,7 @@ export const useHomeViewStore = create<HomeViewState>()(
                     ...current,
                     ...p,
                     channelRankingSort: ranking,
+                    chartPeriod: normalizeChartPeriod(p.chartPeriod) ?? 'today',
                 };
             },
         },

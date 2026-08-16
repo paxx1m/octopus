@@ -140,7 +140,9 @@
             "period": {
                 "today": "今天",
                 "last7Days": "7天",
-                "last30Days": "30天"
+                "last30Days": "30天",
+                "last90Days": "三個月",
+                "allTime": "全部"
             }
         },
         "channelRanking": {

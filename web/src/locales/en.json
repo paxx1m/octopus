@@ -140,7 +140,9 @@
             "period": {
                 "today": "Today",
                 "last7Days": "7 Days",
-                "last30Days": "30 Days"
+                "last30Days": "30 Days",
+                "last90Days": "3 Months",
+                "allTime": "All"
             }
         },
         "channelRanking": {
