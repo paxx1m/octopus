@@ -321,6 +321,10 @@ func (ra *relayAttempt) applyChannelRequestOptions(outboundRequest *httpclient.R
 // 超限后停止追加，仍继续转发；日志侧可能丢失后半段响应体。
 const streamEventBufferMax = 4096
 
+// streamEventTailKeep 是尾部小缓冲的事件数，始终保留流末尾事件。
+// 流被截断时，末尾的 usage chunk 仍可被恢复，避免输出 token 记成 0。
+const streamEventTailKeep = 16
+
 // writeStream 把 pipeline 输出的客户端格式流写回请求方。
 //
 // 设计要点：
@@ -342,6 +346,7 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 
 	firstToken := true
 	responseEvents := make([]*httpclient.StreamEvent, 0, 8)
+	tailEvents := make([]*httpclient.StreamEvent, 0, streamEventTailKeep)
 	eventsTruncated := false
 
 	results := make(chan sseReadResult, 1)
@@ -369,7 +374,7 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 				// reader 已关闭：流正常结束，聚合缓存事件用于日志与 usage。
 				log.Infof("stream end")
 				if len(responseEvents) > 0 {
-					ra.aggregateStreamForLog(ctx, responseEvents, eventsTruncated)
+					ra.aggregateStreamForLog(ctx, responseEvents, tailEvents, eventsTruncated)
 				}
 				return nil
 			}
@@ -381,6 +386,7 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 				continue
 			}
 			responseEvents, eventsTruncated = appendEvent(responseEvents, eventsTruncated, r.event)
+			tailEvents = appendTailEvent(tailEvents, r.event)
 			if firstToken {
 				ra.metrics.FirstTokenTime = time.Now()
 				firstToken = false

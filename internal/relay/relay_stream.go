@@ -62,9 +62,14 @@ func startStreamReader(
 
 // aggregateStreamForLog 在流正常结束后，把缓存的事件聚合成完整响应体，记录 usage 与截断告警。
 // 仅服务日志与计费，不影响已转发的客户端响应。
+//
+// 截断时 usage 丢失问题：OpenAI 兼容流的 usage（含 completion_tokens）位于流末尾。
+// 日志 body 缓存（responseEvents）可能因超长流被截断而丢掉末尾，导致聚合出的 usage 不完整、
+// 输出 token 记成 0。因此截断时用 tailEvents（流末尾小缓冲）再聚合一次，优先取其权威 usage。
 func (ra *relayAttempt) aggregateStreamForLog(
 	ctx context.Context,
 	responseEvents []*httpclient.StreamEvent,
+	tailEvents []*httpclient.StreamEvent,
 	eventsTruncated bool,
 ) {
 	// 流式路径不会自动生成完整响应体；聚合已缓存事件仅用于日志与 usage。
@@ -75,6 +80,13 @@ func (ra *relayAttempt) aggregateStreamForLog(
 	}
 	if eventsTruncated {
 		log.Warnf("stream event buffer truncated at %d events; log body may be incomplete", streamEventBufferMax)
+		// head 缓存截断后可能缺失末尾的 usage chunk；尾部事件始终保留到流结束，
+		// 重新聚合以恢复权威的 token 用量。
+		if len(tailEvents) > 0 {
+			if _, tailMeta, tailErr := ra.inAdapter.AggregateStreamChunks(context.WithoutCancel(ctx), tailEvents); tailErr == nil && tailMeta.Usage != nil {
+				meta.Usage = tailMeta.Usage
+			}
+		}
 	}
 	ra.metrics.InternalResponse = responseBody
 	ra.metrics.RecordUsage(meta.Usage)
@@ -90,6 +102,17 @@ func appendEvent(responseEvents []*httpclient.StreamEvent, eventsTruncated bool,
 		eventsTruncated = true
 	}
 	return responseEvents, eventsTruncated
+}
+
+// appendTailEvent 维护流末尾的小缓冲，保留最近 streamEventTailKeep 个事件。
+// 与 head 缓存不同，它永远不被截断，用于在超长流下恢复末尾的 usage chunk。
+func appendTailEvent(tailEvents []*httpclient.StreamEvent, event *httpclient.StreamEvent) []*httpclient.StreamEvent {
+	if len(tailEvents) < streamEventTailKeep {
+		return append(tailEvents, event)
+	}
+	copy(tailEvents, tailEvents[1:])
+	tailEvents[len(tailEvents)-1] = event
+	return tailEvents
 }
 
 // classifyReadError 将 reader goroutine 投递的错误分类为可操作的 relay 错误。
